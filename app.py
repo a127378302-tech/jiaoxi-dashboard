@@ -1,136 +1,131 @@
 import streamlit as st
 import pandas as pd
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import datetime
 
-# --- 設定網頁標題與版面 ---
-st.set_page_config(page_title="星巴克礁溪門市 | 營運儀表板", page_icon="☕", layout="wide")
+# --- 設定網頁 ---
+st.set_page_config(page_title="星巴克礁溪門市 | 雲端儀表板", page_icon="☕", layout="wide")
 
-# --- 模擬資料庫 (密碼設定) ---
-USERS = {
-    "SM": "sm2026",      # 店經理帳號
-    "SS": "coffee123"    # 值班經理帳號
-}
-
-# --- 登入驗證函式 ---
-def check_login():
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
+# --- 1. 連線設定 (這是魔法的關鍵) ---
+# 這裡會去讀取您在 Streamlit Cloud 設定的 "Secrets"
+def get_google_sheet_data():
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    # 從 Secrets 讀取憑證資訊
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
     
-    if not st.session_state.authenticated:
-        # 顯示登入畫面
-        col1, col2, col3 = st.columns([1,2,1])
-        with col2:
-            st.title("🔒 礁溪門市登入系統")
-            username = st.text_input("帳號")
-            password = st.text_input("密碼", type="password")
-            if st.button("登入"):
-                if username in USERS and USERS[username] == password:
-                    st.session_state.authenticated = True
-                    st.session_state.role = "SM" if username == "SM" else "SS"
-                    st.rerun()
-                else:
-                    st.error("帳號或密碼錯誤")
-        return False
-    return True
+    # 開啟您的試算表 (請確保名稱完全一致)
+    sheet = client.open("Jiaoxi_2026_Data").sheet1
+    return sheet
 
-# --- 初始化空白資料 ---
-@st.cache_data
-def get_empty_data():
+# --- 2. 讀取資料函式 ---
+@st.cache_data(ttl=60) # 每 60 秒快取過期，確保資料新鮮
+def load_data():
+    try:
+        sheet = get_google_sheet_data()
+        data = sheet.get_all_records()
+        if not data:
+            # 如果是空的，建立 2026 空白資料
+            return create_empty_data(sheet)
+        df = pd.DataFrame(data)
+        # 確保日期格式
+        df["日期"] = pd.to_datetime(df["日期"]).dt.date
+        return df
+    except Exception as e:
+        st.error(f"連線失敗，請檢查 Google Sheet 設定: {e}")
+        return pd.DataFrame()
+
+def create_empty_data(sheet):
+    # 初始化 2026 全年資料並寫入 Sheet
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
     df = pd.DataFrame({
-        "日期": date_range,
+        "日期": date_range.astype(str),
         "目標": [0] * len(date_range),
         "實績": [0] * len(date_range),
         "備註": [""] * len(date_range)
     })
-    df["日期"] = df["日期"].dt.date
-    df["星期"] = pd.to_datetime(df["日期"]).dt.day_name().map({
-        'Monday': '一', 'Tuesday': '二', 'Wednesday': '三', 'Thursday': '四',
-        'Friday': '五', 'Saturday': '六', 'Sunday': '日'
-    })
+    # 寫入標題與內容
+    sheet.update([df.columns.values.tolist()] + df.values.tolist())
     return df
 
-# --- 主程式開始 ---
-if check_login():
-    # 側邊欄：功能區
+# --- 3. 儲存資料函式 ---
+def save_data_to_sheet(df):
+    try:
+        sheet = get_google_sheet_data()
+        # 為了避免格式跑掉，我們把日期轉字串
+        save_df = df.copy()
+        save_df["日期"] = save_df["日期"].astype(str)
+        sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
+        st.toast("✅ 雲端同步完成！", icon="☁️") # 跳出可愛的提示
+        st.cache_data.clear() # 清除快取，強制下次讀取最新
+    except Exception as e:
+        st.error(f"儲存失敗: {e}")
+
+# --- 主程式 ---
+# 登入檢查 (簡化版，沿用之前的邏輯)
+USERS = {"SM": "sm2026", "SS": "coffee123"}
+if "authenticated" not in st.session_state: st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 登入")
+    u = st.text_input("User")
+    p = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if u in USERS and USERS[u] == p:
+            st.session_state.authenticated = True
+            st.session_state.role = "SM" if u == "SM" else "SS"
+            st.rerun()
+else:
+    # 登入成功後
     with st.sidebar:
         st.success(f"Hi, {st.session_state.role}")
-        st.markdown("---")
-        st.markdown("### 📥 1. 讀取進度")
-        uploaded_file = st.file_uploader("上傳上次下載的 CSV", type=["csv"])
+        if st.button("重新讀取資料"):
+            st.cache_data.clear()
+            st.rerun()
         
-        st.markdown("### 📅 2. 選擇月份")
-        selected_month = st.selectbox("月份", range(1, 13), format_func=lambda x: f"{x} 月")
-        
-        # 資料初始化邏輯
-        if "df" not in st.session_state:
-            st.session_state.df = get_empty_data()
-        
-        # 如果有上傳檔案，就用上傳的檔案覆蓋
-        if uploaded_file:
-            try:
-                uploaded_df = pd.read_csv(uploaded_file)
-                uploaded_df["日期"] = pd.to_datetime(uploaded_df["日期"]).dt.date
-                st.session_state.df = uploaded_df
-            except:
-                st.error("檔案格式不正確")
+        st.info("💡 資料會自動同步到 Google Sheet，無需手動下載。")
 
-    # 主畫面
+    st.title("☕ 2026 雲端營運儀表板")
+    
+    # 讀取資料 (自動從雲端抓)
+    if "df" not in st.session_state:
+        st.session_state.df = load_data()
+    
     df = st.session_state.df
-    st.title(f"📊 2026 營運目標 - {selected_month}月")
-
-    # 篩選當月資料
+    
+    # 選擇月份
+    selected_month = st.selectbox("月份", range(1, 13))
+    
+    # 篩選與編輯
     df["Month"] = pd.to_datetime(df["日期"]).dt.month
     current_month_df = df[df["Month"] == selected_month].copy()
-
-    # 權限控管 (SS 不能改目標)
-    disabled_cols = ["日期", "星期"]
-    if st.session_state.role == "SS":
-        disabled_cols.append("目標")
-        st.info("💡 值班經理模式：僅能輸入實績與備註，無法修改目標。")
-
-    # 編輯表格
+    
+    # 顯示編輯器
+    disabled = ["日期"] if st.session_state.role == "SM" else ["日期", "目標"]
+    
     edited_df = st.data_editor(
-        current_month_df[["日期", "星期", "目標", "實績", "備註"]],
+        current_month_df[["日期", "目標", "實績", "備註"]],
         column_config={
-            "目標": st.column_config.NumberColumn("目標 $", format="$%d", disabled="目標" in disabled_cols),
-            "實績": st.column_config.NumberColumn("實績 $", format="$%d"),
-            "日期": st.column_config.DateColumn(format="YYYY-MM-DD", disabled=True),
+            "日期": st.column_config.DateColumn(disabled=True),
+            "目標": st.column_config.NumberColumn(disabled="目標" in disabled),
         },
         use_container_width=True,
         hide_index=True,
         num_rows="fixed"
     )
 
-    # 儲存按鈕 (更新記憶體中的資料)
-    if st.button("💾 確認修改 (暫存)"):
-        # 更新總表
+    # 儲存按鈕
+    if st.button("💾 更新並同步到雲端"):
+        # 更新本地 DataFrame
         for index, row in edited_df.iterrows():
             mask = df["日期"] == row["日期"]
             df.loc[mask, "目標"] = row["目標"]
             df.loc[mask, "實績"] = row["實績"]
             df.loc[mask, "備註"] = row["備註"]
-        st.session_state.df = df
-        st.success("✅ 修改已暫存！離開前請務必按下側邊欄的下載按鈕。")
-
-    # 儀表板計算
-    st.markdown("---")
-    total_target = current_month_df["目標"].sum()
-    total_actual = current_month_df["實績"].sum()
-    rate = (total_actual / total_target * 100) if total_target > 0 else 0
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("本月目標", f"${total_target:,.0f}")
-    c2.metric("本月實績", f"${total_actual:,.0f}", delta=f"{total_actual-total_target:,.0f}")
-    c3.metric("達成率", f"{rate:.1f}%")
-
-    # 下載備份 (最重要的一步)
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 💾 3. 儲存進度 (必做)")
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.sidebar.download_button(
-        label="📥 下載最新資料表 (Backup)",
-        data=csv,
-        file_name=f"Jiaoxi_Data_{datetime.date.today()}.csv",
-        mime="text/csv"
-    )
+        
+        # 呼叫儲存函式
+        save_data_to_sheet(df)
+        st.session_state.df = df # 更新記憶體
+        st.success("資料已安全儲存到 Google Sheet！")
