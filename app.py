@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import datetime
+import json
 
 # --- 1. 設定網頁與樣式 ---
 st.set_page_config(page_title="星巴克礁溪門市 | 營運報表", page_icon="☕", layout="wide")
@@ -15,42 +16,44 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. Google Sheet 連線設定 ---
+# --- 2. Google Sheet 連線設定 (穩健版) ---
 def get_google_sheet_data():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open("Jiaoxi_2026_Data").sheet1
-    return sheet
+    
+    # 嘗試讀取 Secrets，如果讀不到會跳出明確錯誤
+    try:
+        if "gcp_service_account" not in st.secrets:
+            st.error("❌ 錯誤：找不到 gcp_service_account 設定。請檢查 Secrets。")
+            st.stop()
+            
+        # 將 TOML 格式轉換為字典
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        
+        # 修正 private_key 的換行符號 (這是最常見的坑)
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        sheet = client.open("Jiaoxi_2026_Data").sheet1
+        return sheet
+        
+    except Exception as e:
+        st.error(f"❌ 連線失敗：{str(e)}")
+        st.info("💡 請檢查 Secrets 格式是否正確，或是否已將機器人 Email 加入試算表共用。")
+        st.stop()
 
 def initialize_sheet(sheet):
-    """
-    初始化試算表結構
-    欄位：日期, 目標PSD, 實績PSD, PSD達成率, ADT, AT, 糕點PSD, 糕點USD, 
-         糕點報廢USD, Retail, NCB, BAF, 節慶USD, 備註
-    """
+    """初始化試算表結構"""
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
+    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', '備註']
     
-    # 您指定的專屬欄位
-    cols = [
-        '日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', 
-        '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', 
-        '節慶USD', '備註'
-    ]
-    
-    # 建立 DataFrame
     df = pd.DataFrame(columns=cols)
     df['日期'] = date_range.astype(str)
-    
-    # 填入預設值
     for c in cols:
-        if c == '備註':
-            df[c] = ""
-        elif c != '日期':
-            df[c] = 0
+        if c == '備註': df[c] = ""
+        elif c != '日期': df[c] = 0
             
-    # 清空並寫入 Google Sheet
     sheet.clear()
     sheet.update([df.columns.values.tolist()] + df.values.tolist())
     return df
@@ -61,7 +64,6 @@ def load_data():
         sheet = get_google_sheet_data()
         data = sheet.get_all_records()
         
-        # 如果是空的，直接初始化
         if not data:
             st.warning("偵測到新格式，正在初始化試算表... (請稍候)")
             df = initialize_sheet(sheet)
@@ -70,7 +72,7 @@ def load_data():
 
         df = pd.DataFrame(data)
         
-        # 檢查關鍵欄位是否存在，若缺少則視為舊格式需更新
+        # 檢查欄位，若不符則重置
         required_cols = ['日期', '目標PSD', '實績PSD', 'NCB', 'BAF'] 
         if not all(col in df.columns for col in required_cols):
             st.error("試算表欄位與新格式不符，正在進行格式升級...")
@@ -88,19 +90,12 @@ def load_data():
 def save_data_to_sheet(df):
     try:
         sheet = get_google_sheet_data()
-        # 只保留指定的欄位順序進行存檔
-        save_cols = [
-            '日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', 
-            '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', 
-            '節慶USD', '備註'
-        ]
-        
-        # 確保 DataFrame 只有這些欄位
+        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', '備註']
         save_df = df[save_cols].copy()
         save_df["日期"] = save_df["日期"].astype(str)
         save_df = save_df.fillna(0)
         
-        sheet.clear() # 清除舊資料以確保欄位乾淨
+        sheet.clear()
         sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
         st.toast("✅ 數據已更新！", icon="💾")
         st.cache_data.clear()
@@ -141,19 +136,16 @@ else:
     if df.empty:
         st.stop()
 
-    # 月份選擇
     current_month = datetime.date.today().month
     selected_month = st.selectbox("月份", range(1, 13), index=current_month-1)
     
     df["Month"] = pd.to_datetime(df["日期"]).dt.month
     current_month_df = df[df["Month"] == selected_month].copy()
 
-    # SS 權限控制 (鎖定目標PSD)
     disabled_target = True if st.session_state.role == "SS" else False
 
     st.subheader(f"📝 {selected_month} 月數據輸入")
     
-    # 分頁設計：依據您的新欄位分類
     tab1, tab2 = st.tabs(["📊 PSD & KPI (來客/客單)", "🥐 商品銷售 (Product Sales)"])
     
     with tab1:
@@ -195,9 +187,7 @@ else:
             key="editor_prod"
         )
 
-    # --- 儲存與運算 ---
     if st.button("💾 確認更新", type="primary"):
-        # 合併 Tab 1 的修改
         for i, row in edited_kpi.iterrows():
             mask = df["日期"] == row["日期"]
             df.loc[mask, "目標PSD"] = row["目標PSD"]
@@ -205,40 +195,30 @@ else:
             df.loc[mask, "ADT"] = row["ADT"]
             df.loc[mask, "AT"] = row["AT"]
             df.loc[mask, "備註"] = row["備註"]
-            
-            # 自動計算 PSD 達成率
             t_psd = row["目標PSD"] if row["目標PSD"] > 0 else 1
             df.loc[mask, "PSD達成率"] = round(row["實績PSD"] / t_psd * 100, 1)
 
-        # 合併 Tab 2 的修改
         for i, row in edited_prod.iterrows():
             mask = df["日期"] == row["日期"]
             cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
-            for c in cols:
-                df.loc[mask, c] = row[c]
+            for c in cols: df.loc[mask, c] = row[c]
 
         save_data_to_sheet(df)
         st.session_state.df = df
         st.success("已儲存！")
 
-    # --- 儀表板 ---
     st.markdown("---")
     st.subheader("📈 關鍵指標分析")
     
-    # 統計運算
     total_target_psd = current_month_df["目標PSD"].sum()
     total_actual_psd = current_month_df["實績PSD"].sum()
     psd_rate = (total_actual_psd / total_target_psd * 100) if total_target_psd > 0 else 0
-    
-    # 預估業績 (PSD * ADT) - 因為沒有直接的業績欄位，我們用加權平均估算
-    # 或者單純顯示各項總和
     total_food = current_month_df["糕點USD"].sum()
     total_retail = current_month_df["Retail"].sum()
     total_ncb = current_month_df["NCB"].sum()
     total_waste = current_month_df["糕點報廢USD"].sum()
     
     c1, c2, c3, c4, c5 = st.columns(5)
-    
     c1.metric("PSD 達成率", f"{psd_rate:.1f}%", delta=f"{total_actual_psd - total_target_psd:,.0f} 人")
     c2.metric("糕點總業績", f"${total_food:,.0f}")
     c3.metric("Retail 總業績", f"${total_retail:,.0f}")
