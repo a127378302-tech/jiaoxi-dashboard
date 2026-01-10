@@ -3,7 +3,6 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import datetime
-import json
 
 # --- 1. 設定網頁與樣式 ---
 st.set_page_config(page_title="星巴克礁溪門市 | 營運報表", page_icon="☕", layout="wide")
@@ -12,6 +11,7 @@ st.markdown("""
 <style>
     .stNumberInput input { padding: 0px 5px; }
     div[data-testid="stMetricValue"] { font-size: 1.2rem; }
+    .big-font { font-size: 18px !important; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -34,23 +34,39 @@ HOLIDAYS_2026 = {
     "2026-10-10": "🔴 國慶日",
 }
 
-def get_date_display(date_obj):
-    """將日期轉換為：01/01 (四) 🔴 元旦"""
-    date_str = str(date_obj)
-    
-    # 1. 判斷是否為國定假日
-    if date_str in HOLIDAYS_2026:
-        week_str = ["(一)", "(二)", "(三)", "(四)", "(五)", "(六)", "(日)"][date_obj.weekday()]
-        return f"{date_obj.strftime('%m/%d')} {week_str} {HOLIDAYS_2026[date_str]}"
-    
-    # 2. 判斷週末
-    weekday = date_obj.weekday() # 0=Mon, 6=Sun
-    week_str = ["(一)", "(二)", "(三)", "(四)", "(五)", "(六)", "(日)"][weekday]
-    
-    if weekday >= 5: # 週六週日
-        return f"{date_obj.strftime('%m/%d')} {week_str} 🟠"
-    else:
-        return f"{date_obj.strftime('%m/%d')} {week_str}"
+def get_date_display(date_input):
+    """
+    將日期轉換為：01/01 (四) 🔴 元旦
+    增加防呆機制，確保不會報錯
+    """
+    try:
+        # 1. 確保是 datetime 物件
+        if isinstance(date_input, str):
+            date_obj = pd.to_datetime(date_input).date()
+        elif isinstance(date_input, pd.Timestamp):
+            date_obj = date_input.date()
+        else:
+            date_obj = date_input
+
+        date_str = str(date_obj) # 轉成 2026-01-01 格式比對
+        
+        # 2. 判斷是否為國定假日
+        if date_str in HOLIDAYS_2026:
+            week_str = ["(一)", "(二)", "(三)", "(四)", "(五)", "(六)", "(日)"][date_obj.weekday()]
+            return f"{date_obj.strftime('%m/%d')} {week_str} {HOLIDAYS_2026[date_str]}"
+        
+        # 3. 判斷週末
+        weekday = date_obj.weekday() # 0=Mon, 6=Sun
+        week_str = ["(一)", "(二)", "(三)", "(四)", "(五)", "(六)", "(日)"][weekday]
+        
+        if weekday >= 5: # 週六週日 (5, 6)
+            return f"{date_obj.strftime('%m/%d')} {week_str} 🟠"
+        else:
+            return f"{date_obj.strftime('%m/%d')} {week_str}"
+            
+    except Exception:
+        # 如果真的轉換失敗，回傳原始資料，避免欄位空白
+        return str(date_input)
 
 # --- 3. Google Sheet 連線設定 ---
 def get_google_sheet_data():
@@ -94,17 +110,24 @@ def load_data():
     try:
         sheet = get_google_sheet_data()
         data = sheet.get_all_records()
+        
         if not data:
             df = initialize_sheet(sheet)
-        else:
-            df = pd.DataFrame(data)
-            required_cols = ['日期', '目標PSD', '實績PSD', 'NCB', 'BAF'] 
-            if not all(col in df.columns for col in required_cols):
-                df = initialize_sheet(sheet)
+            df["日期"] = pd.to_datetime(df["日期"]).dt.date
+            return df
+
+        df = pd.DataFrame(data)
         
-        # 轉換日期格式
+        # 檢查欄位
+        required_cols = ['日期', '目標PSD', '實績PSD', 'NCB', 'BAF'] 
+        if not all(col in df.columns for col in required_cols):
+            st.error("偵測到舊格式，正在升級欄位...")
+            df = initialize_sheet(sheet)
+        
+        # 強制轉換日期格式，確保後續運算正常
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
         return df
+
     except Exception as e:
         st.error(f"讀取錯誤: {e}")
         return pd.DataFrame()
@@ -153,9 +176,12 @@ selected_month = st.selectbox("月份", range(1, 13), index=current_month-1)
 df["Month"] = pd.to_datetime(df["日期"]).dt.month
 current_month_df = df[df["Month"] == selected_month].copy()
 
-# --- 關鍵修改：新增一個「顯示用日期」欄位 ---
-# 我們不改原本的「日期」欄位（因為存檔要用），而是多做一個欄位給眼睛看
-current_month_df["顯示日期"] = current_month_df["日期"].apply(get_date_display)
+# --- 製作顯示用日期 (包含顏色與星期) ---
+# 使用 apply 前先確保不會因為資料問題報錯
+if not current_month_df.empty:
+    current_month_df["顯示日期"] = current_month_df["日期"].apply(get_date_display)
+else:
+    current_month_df["顯示日期"] = []
 
 # 數據輸入區
 st.subheader(f"📝 {selected_month} 月數據輸入")
@@ -163,16 +189,15 @@ st.subheader(f"📝 {selected_month} 月數據輸入")
 tab1, tab2 = st.tabs(["📊 核心業績 (PSD/ADT/AT)", "🥐 商品與庫存 (Product/Waste)"])
 
 with tab1:
-    st.caption("🔴假日 / 🟠週末 / ⚪平日")
+    st.caption("輸入說明：請輸入「每日業績」與「來客數」，系統將自動計算「客單價」。")
     
-    # 這裡我們把 "顯示日期" 放在第一欄，原本的 "日期" 隱藏起來(設為 None 或不選)
-    # 但為了存檔方便，我們還是保留 "日期" 在 DataFrame 裡，只是不讓編輯器顯示
-    
+    # 這裡確保 "顯示日期" 是第一個欄位
     edited_kpi = st.data_editor(
         current_month_df[['顯示日期', '日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '備註']],
         column_config={
+            # 這裡設定寬度為 medium，避免被切掉
             "顯示日期": st.column_config.TextColumn("日期 (星期)", disabled=True, width="medium"),
-            "日期": None, # 隱藏原始日期欄位，讓畫面更乾淨
+            "日期": None, # 隱藏原始日期
             
             "目標PSD": st.column_config.NumberColumn("每日業績目標 ($)", format="$%d", min_value=0),
             "實績PSD": st.column_config.NumberColumn("每日實績業績 ($)", format="$%d", min_value=0),
@@ -188,12 +213,12 @@ with tab1:
     )
 
 with tab2:
-    st.caption("🔴假日 / 🟠週末 / ⚪平日")
+    st.caption("輸入說明：糕點、Retail、BAF、節慶")
     edited_prod = st.data_editor(
         current_month_df[['顯示日期', '日期', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']],
         column_config={
             "顯示日期": st.column_config.TextColumn("日期 (星期)", disabled=True, width="medium"),
-            "日期": None, # 隱藏
+            "日期": None,
             
             "糕點PSD": st.column_config.NumberColumn("糕點業績 PSD", format="$%d"),
             "糕點USD": st.column_config.NumberColumn("糕點銷量 USD", format="%d"),
@@ -213,7 +238,7 @@ with tab2:
 if st.button("💾 確認更新 (並自動計算客單價)", type="primary"):
     # Tab 1 更新
     for i, row in edited_kpi.iterrows():
-        # 這裡我們用 row['日期'] (雖然隱藏了，但資料還在) 來對應
+        # 用 row['日期'] (原始資料) 來對應
         mask = df["日期"] == row["日期"]
         
         df.loc[mask, "目標PSD"] = row["目標PSD"]
@@ -221,7 +246,6 @@ if st.button("💾 確認更新 (並自動計算客單價)", type="primary"):
         df.loc[mask, "ADT"] = row["ADT"]
         df.loc[mask, "備註"] = row["備註"]
         
-        # 自動計算
         t_psd = row["目標PSD"] if row["目標PSD"] > 0 else 1
         df.loc[mask, "PSD達成率"] = round(row["實績PSD"] / t_psd * 100, 1)
         
