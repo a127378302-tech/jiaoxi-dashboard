@@ -116,6 +116,14 @@ def load_data():
             df = initialize_sheet(sheet)
         
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
+        
+        # --- 關鍵修正：強制將數值欄位轉為數字 (Float) ---
+        # 這樣 Streamlit 才知道要用 %.1f%% 格式去顯示它，而不是當成文字
+        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                
         return df
 
     except Exception as e:
@@ -159,14 +167,12 @@ if "df" not in st.session_state:
 df = st.session_state.df
 if df.empty: st.stop()
 
-# 月份選擇
 current_month = datetime.date.today().month
 selected_month = st.selectbox("月份", range(1, 13), index=current_month-1)
 
 df["Month"] = pd.to_datetime(df["日期"]).dt.month
 current_month_df = df[df["Month"] == selected_month].copy()
 
-# 產生顯示日期
 if not current_month_df.empty:
     current_month_df["顯示日期"] = current_month_df["日期"].apply(get_date_display)
 else:
@@ -189,14 +195,12 @@ with tab1:
             "目標PSD": st.column_config.NumberColumn("每日業績目標 ($)", format="$%d", min_value=0),
             "實績PSD": st.column_config.NumberColumn("每日實績業績 ($)", format="$%d", min_value=0),
             
-            # 1. PSD 達成率：顯示小數點後一位
+            # --- 修正重點 ---
+            # 確保格式為 %.1f%% (例如 95.5%)
             "PSD達成率": st.column_config.NumberColumn("達成率 %", disabled=True, format="%.1f%%"),
             
             "ADT": st.column_config.NumberColumn("每日來客數 (人)", format="%d", min_value=0),
-            
-            # 2. 客單價 AT：整數顯示 ($%d)
             "AT": st.column_config.NumberColumn("客單價 AT (整數)", disabled=True, format="$%d"),
-            
             "備註": st.column_config.TextColumn(width="medium"),
         },
         use_container_width=True,
@@ -217,10 +221,7 @@ with tab2:
             "糕點USD": st.column_config.NumberColumn("糕點銷量 USD", format="%d"),
             "糕點報廢USD": st.column_config.NumberColumn("糕點報廢 USD", format="%d"),
             "Retail": st.column_config.NumberColumn("Retail 商品", format="$%d"),
-            
-            # 3. NCB：單位改為杯數 (%d)，移除 $ 符號
             "NCB": st.column_config.NumberColumn("NCB (杯)", format="%d"),
-            
             "BAF": st.column_config.NumberColumn("BAF/SCHP (張)", format="%d"),
             "節慶USD": st.column_config.NumberColumn("節慶禮盒/蛋糕", format="%d"),
         },
@@ -234,20 +235,20 @@ with tab2:
 if st.button("💾 確認更新 (並自動計算客單價)", type="primary"):
     for i, row in edited_kpi.iterrows():
         mask = df["日期"] == row["日期"]
-        
         df.loc[mask, "目標PSD"] = row["目標PSD"]
         df.loc[mask, "實績PSD"] = row["實績PSD"]
         df.loc[mask, "ADT"] = row["ADT"]
         df.loc[mask, "備註"] = row["備註"]
         
-        # PSD 達成率 (保留小數點一位)
+        # 這裡的運算結果會是浮點數 (例如 95.5)
+        # 配合上面的 format="%.1f%%"，顯示出來就會是 95.5%
         t_psd = row["目標PSD"] if row["目標PSD"] > 0 else 1
         df.loc[mask, "PSD達成率"] = round(row["實績PSD"] / t_psd * 100, 1)
         
-        # AT 客單價 (四捨五入取整數)
+        # 客單價強制轉整數
         cust = row["ADT"] if row["ADT"] > 0 else 1
         at_val = row["實績PSD"] / cust if row["ADT"] > 0 else 0
-        df.loc[mask, "AT"] = int(round(at_val, 0)) # 這裡強制轉為整數存檔
+        df.loc[mask, "AT"] = int(round(at_val, 0))
 
     for i, row in edited_prod.iterrows():
         mask = df["日期"] == row["日期"]
@@ -256,7 +257,7 @@ if st.button("💾 確認更新 (並自動計算客單價)", type="primary"):
 
     save_data_to_sheet(df)
     st.session_state.df = df
-    st.success("已儲存！客單價 (AT) 已更新為整數。")
+    st.success("已儲存！數據格式已更新。")
 
 # 儀表板
 st.markdown("---")
@@ -269,12 +270,11 @@ total_visitors = current_month_df["ADT"].sum()
 avg_at = total_sales_actual / total_visitors if total_visitors > 0 else 0
 total_food_sales = current_month_df["糕點PSD"].sum()
 total_waste_unit = current_month_df["糕點報廢USD"].sum()
-# 增加 NCB 杯數統計
 total_ncb_cups = current_month_df["NCB"].sum()
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("業績達成率 (PSD)", f"{sales_achieve_rate:.1f}%", delta=f"${total_sales_actual - total_sales_target:,.0f}")
 c2.metric("總來客數 (ADT)", f"{total_visitors:,.0f} 人")
-c3.metric("平均客單價 (AT)", f"${avg_at:.0f}") # 儀表板也顯示整數
-c4.metric("NCB 總杯數", f"{total_ncb_cups:,.0f} 杯") # 顯示總杯數
+c3.metric("平均客單價 (AT)", f"${avg_at:.0f}")
+c4.metric("NCB 總杯數", f"{total_ncb_cups:,.0f} 杯")
 c5.metric("糕點報廢量", f"{total_waste_unit:,.0f} 個", delta_color="inverse")
