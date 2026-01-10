@@ -273,51 +273,58 @@ if st.button("💾 確認更新 (並自動計算)", type="primary"):
     # --- 關鍵：強制重新載入頁面，讓計算結果立刻顯示 ---
     st.rerun()
 
-# --- 儀表板 (修改後) ---
+# --- 儀表板 (新版：分為績效看板與關鍵指標) ---
 st.markdown("---")
-st.subheader("📈 關鍵指標分析")
 
-# 1. 基礎計算：找出有營業數據的天數 (避免平均值被未來的 0 拉低)
-# 邏輯：只要當天有輸入業績 (實績PSD > 0) 就視為有營業
+# 1. 基礎運算邏輯
+# 找出「有效營業日」：只計算實績 PSD > 0 的天數，避免平均值被未來的空白日拉低
 valid_days_df = current_month_df[current_month_df["實績PSD"] > 0]
 days_count = valid_days_df.shape[0]
-if days_count == 0: days_count = 1  # 避免除以 0
 
-# 2. 計算總量與達成率 (保留最重要的月達成率)
+# 避免除以 0 的保護機制
+if days_count == 0: 
+    days_count = 1
+    safe_valid_df = current_month_df  # 若完全無數據，暫時用全表避免報錯(雖然都是0)
+else:
+    safe_valid_df = valid_days_df
+
+# --- 數據計算區 ---
+
+# [Section 1] 績效看板數據
+total_sales_actual = current_month_df["實績PSD"].sum()          # 累積 SALES
 total_sales_target = current_month_df["目標PSD"].sum()
-total_sales_actual = current_month_df["實績PSD"].sum()
-sales_achieve_rate = (total_sales_actual / total_sales_target * 100) if total_sales_target > 0 else 0
+achieve_rate = (total_sales_actual / total_sales_target * 100) if total_sales_target > 0 else 0 # 達成率
+avg_psd = total_sales_actual / days_count                       # 平均 PSD
+avg_adt = safe_valid_df["ADT"].mean()                           # 平均 ADT (筆)
+# 平均 AT = 總業績 / 總來客數 (這樣比每日AT平均更準確)
+total_adt = current_month_df["ADT"].sum()
+avg_at = total_sales_actual / total_adt if total_adt > 0 else 0 # 平均 AT
 
-# 3. 計算各項平均指標 (依據您的需求調整)
-# 平均來客數
-avg_adt = valid_days_df["ADT"].mean()
+# [Section 2] 關鍵指標數據
+avg_pastry_psd = safe_valid_df["糕點PSD"].mean()         # 平均糕點 PSD (元)
+avg_pastry_usd = safe_valid_df["糕點USD"].mean()         # 平均糕點 USD (個)
+avg_waste_usd = safe_valid_df["糕點報廢USD"].mean()      # 平均糕點報廢 USD (個)
+avg_ncb = safe_valid_df["NCB"].mean()                    # 平均 NCB (杯)
+avg_retail = safe_valid_df["Retail"].mean()              # 平均 Retail (元)
 
-# 平均杯數 (NCB)
-avg_ncb = valid_days_df["NCB"].mean()
+# --- 畫面呈現區 ---
 
-# 平均糕點報廢 USD (這裡假設使用 '糕點報廢USD' 欄位)
-avg_waste = valid_days_df["糕點報廢USD"].mean()
+# 1. 本月績效看板
+st.subheader("🏆 本月績效看板")
+m1, m2, m3, m4, m5 = st.columns(5)
 
-# 糕點銷售平均 USD (對應 '糕點USD' 欄位，若是金額則用 '糕點PSD')
-# 依據您提到的 "銷售平均USD"，這裡取用 '糕點USD' (銷量) 或 '糕點PSD' (金額)
-# 為了保險，這裡我先設定為 '糕點PSD' (金額)，若您是指銷量(顆數)請改成 "糕點USD"
-avg_pastry_sales = valid_days_df["糕點PSD"].mean() 
+m1.metric("累積 SALES", f"${total_sales_actual:,.0f}")
+m2.metric("累積達成率", f"{achieve_rate:.1f}%", delta=f"${total_sales_actual - total_sales_target:,.0f}")
+m3.metric("平均 PSD", f"${avg_psd:,.0f}")
+m4.metric("平均 ADT", f"{avg_adt:,.0f} 筆")
+m5.metric("平均 AT", f"${avg_at:,.0f}")
 
-# Retail 商品銷售平均 PSD (對應 'Retail' 欄位)
-avg_retail_sales = valid_days_df["Retail"].mean()
+# 2. 關鍵指標
+st.subheader("⚡ 關鍵指標 (Daily Average)")
+k1, k2, k3, k4, k5 = st.columns(5)
 
-# --- 顯示區塊 ---
-
-# 上方顯示總體業績達成狀況
-st.metric("本月累計業績達成率", f"{sales_achieve_rate:.1f}%", f"${total_sales_actual - total_sales_target:,.0f}")
-
-st.markdown("##### 每日平均效能 (Daily Average)")
-
-# 下方顯示五個調整後的平均指標
-c1, c2, c3, c4, c5 = st.columns(5)
-
-c1.metric("平均來客數", f"{avg_adt:,.0f} 人")
-c2.metric("平均杯數 (NCB)", f"{avg_ncb:,.1f} 杯")
-c3.metric("平均糕點報廢", f"${avg_waste:,.0f}") # 假設報廢是金額，若為數量可拿掉 $
-c4.metric("糕點銷售平均", f"${avg_pastry_sales:,.0f}")
-c5.metric("Retail銷售平均", f"${avg_retail_sales:,.0f}")
+k1.metric("平均糕點 PSD", f"${avg_pastry_psd:,.0f}")
+k2.metric("平均糕點 USD", f"{avg_pastry_usd:,.1f} 個")
+k3.metric("平均糕點報廢", f"{avg_waste_usd:,.1f} 個", delta_color="inverse") # 報廢顯示紅色(inverse)提醒
+k4.metric("平均 NCB", f"{avg_ncb:,.1f} 杯")
+k5.metric("平均 Retail", f"${avg_retail:,.0f}")
