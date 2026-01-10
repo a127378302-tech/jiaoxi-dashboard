@@ -115,10 +115,10 @@ def load_data():
             st.error("偵測到舊格式，正在升級欄位...")
             df = initialize_sheet(sheet)
         
+        # 強制轉日期格式
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
         
-        # --- 關鍵修正：強制將數值欄位轉為數字 (Float) ---
-        # 這樣 Streamlit 才知道要用 %.1f%% 格式去顯示它，而不是當成文字
+        # 強制轉數值格式 (避免達成率變成文字無法顯示)
         numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
         for col in numeric_cols:
             if col in df.columns:
@@ -184,7 +184,7 @@ st.subheader(f"📝 {selected_month} 月數據輸入")
 tab1, tab2 = st.tabs(["📊 核心業績 (PSD/ADT/AT)", "🥐 商品與庫存 (Product/Waste)"])
 
 with tab1:
-    st.caption("輸入說明：請輸入「每日業績」與「來客數」，系統將自動計算「客單價」。")
+    st.caption("輸入說明：請輸入「每日業績」與「來客數」，按下【確認更新】後，系統會自動算出達成率與客單價。")
     
     edited_kpi = st.data_editor(
         current_month_df[['顯示日期', '日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '備註']],
@@ -195,8 +195,7 @@ with tab1:
             "目標PSD": st.column_config.NumberColumn("每日業績目標 ($)", format="$%d", min_value=0),
             "實績PSD": st.column_config.NumberColumn("每日實績業績 ($)", format="$%d", min_value=0),
             
-            # --- 修正重點 ---
-            # 確保格式為 %.1f%% (例如 95.5%)
+            # --- 設定達成率顯示格式 ---
             "PSD達成率": st.column_config.NumberColumn("達成率 %", disabled=True, format="%.1f%%"),
             
             "ADT": st.column_config.NumberColumn("每日來客數 (人)", format="%d", min_value=0),
@@ -232,32 +231,47 @@ with tab2:
     )
 
 # 儲存按鈕
-if st.button("💾 確認更新 (並自動計算客單價)", type="primary"):
+if st.button("💾 確認更新 (並自動計算)", type="primary"):
+    # Tab 1 更新
     for i, row in edited_kpi.iterrows():
-        mask = df["日期"] == row["日期"]
-        df.loc[mask, "目標PSD"] = row["目標PSD"]
-        df.loc[mask, "實績PSD"] = row["實績PSD"]
-        df.loc[mask, "ADT"] = row["ADT"]
-        df.loc[mask, "備註"] = row["備註"]
+        # 強制將 row["日期"] 轉為 date 物件，確保與 df["日期"] 格式一致
+        row_date = pd.to_datetime(row["日期"]).date() if isinstance(row["日期"], (str, pd.Timestamp)) else row["日期"]
         
-        # 這裡的運算結果會是浮點數 (例如 95.5)
-        # 配合上面的 format="%.1f%%"，顯示出來就會是 95.5%
-        t_psd = row["目標PSD"] if row["目標PSD"] > 0 else 1
-        df.loc[mask, "PSD達成率"] = round(row["實績PSD"] / t_psd * 100, 1)
+        mask = df["日期"] == row_date
         
-        # 客單價強制轉整數
-        cust = row["ADT"] if row["ADT"] > 0 else 1
-        at_val = row["實績PSD"] / cust if row["ADT"] > 0 else 0
-        df.loc[mask, "AT"] = int(round(at_val, 0))
+        if mask.any(): # 確保有找到對應日期
+            df.loc[mask, "目標PSD"] = row["目標PSD"]
+            df.loc[mask, "實績PSD"] = row["實績PSD"]
+            df.loc[mask, "ADT"] = row["ADT"]
+            df.loc[mask, "備註"] = row["備註"]
+            
+            # --- 關鍵修正：確保計算結果是浮點數 ---
+            # 實績 / 目標 * 100
+            t_psd = float(row["目標PSD"]) if row["目標PSD"] > 0 else 1.0
+            actual_psd = float(row["實績PSD"])
+            
+            # 計算並取小數點後1位
+            achievement = round((actual_psd / t_psd) * 100, 1)
+            df.loc[mask, "PSD達成率"] = achievement
+            
+            # 客單價運算
+            cust = float(row["ADT"]) if row["ADT"] > 0 else 1.0
+            at_val = actual_psd / cust if row["ADT"] > 0 else 0
+            df.loc[mask, "AT"] = int(round(at_val, 0))
 
+    # Tab 2 更新
     for i, row in edited_prod.iterrows():
-        mask = df["日期"] == row["日期"]
+        row_date = pd.to_datetime(row["日期"]).date() if isinstance(row["日期"], (str, pd.Timestamp)) else row["日期"]
+        mask = df["日期"] == row_date
         cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
         for c in cols: df.loc[mask, c] = row[c]
 
+    # 存檔與更新 Session
     save_data_to_sheet(df)
     st.session_state.df = df
-    st.success("已儲存！數據格式已更新。")
+    
+    # --- 關鍵：強制重新載入頁面，讓計算結果立刻顯示 ---
+    st.rerun()
 
 # 儀表板
 st.markdown("---")
