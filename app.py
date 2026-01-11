@@ -354,3 +354,46 @@ k2.metric("平均糕點 USD", f"{avg_pastry_usd:,.1f} 個")
 k3.metric("平均糕點報廢", f"{avg_waste_usd:,.1f} 個", delta_color="inverse")
 k4.metric("平均 NCB", f"{avg_ncb:,.1f} 杯")
 k5.metric("平均 Retail", f"${avg_retail:,.0f}")
+
+# --- [新增] AI 分析指令產生器 ---
+st.markdown("---")
+st.subheader("🤖 呼叫 AI 營運顧問")
+
+with st.expander("點擊展開：取得 AI 分析專用數據包"):
+    st.info("💡 說明：請複製下方文字，貼給 ChatGPT / Gemini，即可獲得專業營運建議。")
+    
+    # 1. 整理標頭資訊
+    if view_mode == "單週分析" and week_options:
+        period_info = f"2026年 {selected_label}"
+    else:
+        period_info = f"2026年 {selected_month}月 (全月累計)"
+    
+    # 2. 整理核心數據字串
+    ai_prompt = f"""我是星巴克店經理，請協助我分析以下門市營運數據，並給出具體改善建議。
+    
+【分析區間】：{period_info}
+
+【核心績效】：
+- 業績達成率：{achieve_rate:.1f}% (目標 {total_sales_target:,.0f} / 實績 {total_sales_actual:,.0f})
+- 平均來客數 (ADT)：{avg_adt:.0f} 人
+- 平均客單價 (AT)：${avg_at:.0f}
+- 糕點報廢 (Waste)：平均每日 {avg_waste_usd:.1f} 個
+
+【每日明細數據 (Date | PSD | ADT | Waste)】：
+"""
+    
+    # 3. 整理每日明細 (只列出有數據的日子)
+    # 依據目前篩選的 target_df 來列表
+    detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
+    
+    if not detail_data.empty:
+        for idx, row in detail_data.iterrows():
+            d_str = row["日期"].strftime("%m/%d")
+            ai_prompt += f"- {d_str}: 業績${row['實績PSD']:,.0f} | 來客{row['ADT']} | 報廢${row['糕點報廢USD']}\n"
+    else:
+        ai_prompt += "(此區間尚無詳細數據)"
+
+    ai_prompt += "\n請針對「業績缺口」、「報廢控制」與「來客數趨勢」進行點評，並給我下週的操作建議。"
+
+    # 4. 顯示複製區塊
+    st.code(ai_prompt, language="text")
