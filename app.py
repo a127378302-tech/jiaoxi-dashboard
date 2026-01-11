@@ -273,39 +273,76 @@ if st.button("💾 確認更新 (並自動計算)", type="primary"):
     # --- 關鍵：強制重新載入頁面，讓計算結果立刻顯示 ---
     st.rerun()
 
-# --- 儀表板 (新版：分為績效看板與關鍵指標) ---
+# --- 儀表板數據計算與篩選區 ---
 st.markdown("---")
 
-# 1. 基礎運算邏輯
-# 找出「有效營業日」：只計算實績 PSD > 0 的天數，避免平均值被未來的空白日拉低
-valid_days_df = current_month_df[current_month_df["實績PSD"] > 0]
+# 1. 建立週次資料 (輔助欄位)
+# 將日期轉為 ISO 週次，方便群組化
+current_month_df["Week_Num"] = pd.to_datetime(current_month_df["日期"]).dt.isocalendar().week
+
+# 2. 增加「檢視模式」選擇器 (這是新增的核心功能)
+st.subheader("📅 數據檢視範圍")
+col_view, col_week = st.columns([1, 3])
+
+with col_view:
+    view_mode = st.radio("選擇模式", ["全月累計", "單週分析"], horizontal=True, label_visibility="collapsed")
+
+target_df = current_month_df # 預設為全月資料
+
+if view_mode == "單週分析":
+    # 找出本月有哪些週次
+    weeks = sorted(current_month_df["Week_Num"].unique())
+    week_options = {}
+    
+    # 建立友善的顯示名稱 (例如: Week 2 | 01/05 ~ 01/11)
+    for w in weeks:
+        week_data = current_month_df[current_month_df["Week_Num"] == w]
+        start_date = week_data["日期"].min().strftime("%m/%d")
+        end_date = week_data["日期"].max().strftime("%m/%d")
+        week_label = f"Week {w} | {start_date} ~ {end_date}"
+        week_options[week_label] = w
+    
+    with col_week:
+        # 預設選取最後一週 (方便檢視最近數據)
+        selected_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
+        selected_week_num = week_options[selected_label]
+        
+        # 過濾資料：只留下選定該週的數據
+        target_df = current_month_df[current_month_df["Week_Num"] == selected_week_num]
+
+# 3. 基礎運算邏輯 (針對 target_df 進行運算，所以會自動隨選擇變動)
+# 找出「有效營業日」：只計算實績 PSD > 0 的天數
+valid_days_df = target_df[target_df["實績PSD"] > 0]
 days_count = valid_days_df.shape[0]
 
 # 避免除以 0 的保護機制
 if days_count == 0: 
     days_count = 1
-    safe_valid_df = current_month_df  # 若完全無數據，暫時用全表避免報錯(雖然都是0)
+    safe_valid_df = target_df 
 else:
     safe_valid_df = valid_days_df
 
-# --- 數據計算區 ---
-
 # [Section 1] 績效看板數據
-total_sales_actual = current_month_df["實績PSD"].sum()          # 累積 SALES
-total_sales_target = current_month_df["目標PSD"].sum()
-achieve_rate = (total_sales_actual / total_sales_target * 100) if total_sales_target > 0 else 0 # 達成率
-avg_psd = total_sales_actual / days_count                       # 平均 PSD
-avg_adt = safe_valid_df["ADT"].mean()                           # 平均 ADT (筆)
-# 平均 AT = 總業績 / 總來客數 (這樣比每日AT平均更準確)
-total_adt = current_month_df["ADT"].sum()
-avg_at = total_sales_actual / total_adt if total_adt > 0 else 0 # 平均 AT
+total_sales_actual = target_df["實績PSD"].sum()          # 區間累積 SALES
+total_sales_target = target_df["目標PSD"].sum()
+achieve_rate = (total_sales_actual / total_sales_target * 100) if total_sales_target > 0 else 0 
+avg_psd = total_sales_actual / days_count                # 區間平均 PSD
+avg_adt = safe_valid_df["ADT"].mean()                    # 區間平均 ADT
+total_adt = target_df["ADT"].sum()
+avg_at = total_sales_actual / total_adt if total_adt > 0 else 0 
 
 # [Section 2] 關鍵指標數據
-avg_pastry_psd = safe_valid_df["糕點PSD"].mean()         # 平均糕點 PSD (元)
-avg_pastry_usd = safe_valid_df["糕點USD"].mean()         # 平均糕點 USD (個)
-avg_waste_usd = safe_valid_df["糕點報廢USD"].mean()      # 平均糕點報廢 USD (個)
-avg_ncb = safe_valid_df["NCB"].mean()                    # 平均 NCB (杯)
-avg_retail = safe_valid_df["Retail"].mean()              # 平均 Retail (元)
+avg_pastry_psd = safe_valid_df["糕點PSD"].mean()         
+avg_pastry_usd = safe_valid_df["糕點USD"].mean()         
+avg_waste_usd = safe_valid_df["糕點報廢USD"].mean()      
+avg_ncb = safe_valid_df["NCB"].mean()                    
+avg_retail = safe_valid_df["Retail"].mean()              
+
+# 顯示目前的檢視狀態 (提示使用者)
+if view_mode == "單週分析":
+    st.info(f"🔍 目前顯示範圍： **{selected_label}** 之數據分析")
+else:
+    st.success(f"🔍 目前顯示範圍： **{selected_month} 月份全月累計**")
 
 # --- 畫面呈現區 ---
 
