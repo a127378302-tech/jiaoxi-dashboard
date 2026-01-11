@@ -164,7 +164,8 @@ def load_data():
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
+
+        df["今日活動"] = df["日期"].apply(lambda x: get_event_info(x))
         return df
 
     except Exception as e:
@@ -228,10 +229,13 @@ with tab1:
     st.caption("輸入說明：請輸入「每日業績」與「來客數」，按下【確認更新】後，系統會自動算出達成率與客單價。")
     
     edited_kpi = st.data_editor(
-        current_month_df[['顯示日期', '日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '備註']],
+        # 增加 '今日活動' 欄位
+        current_month_df[['顯示日期', '今日活動', '日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '備註']],
         column_config={
-            "顯示日期": st.column_config.TextColumn("日期 (星期)", disabled=True, width="medium"),
+            "顯示日期": st.column_config.TextColumn("日期 (星期)", disabled=True, width="small"),
+            "今日活動": st.column_config.TextColumn("📅 當日行銷活動 (自動帶入)", disabled=True, width="medium"), # 新增這行
             "日期": None,
+            # ... (其他欄位保持不變)
             
             "目標PSD": st.column_config.NumberColumn("每日業績目標 ($)", format="$%d", min_value=0),
             "實績PSD": st.column_config.NumberColumn("每日實績業績 ($)", format="$%d", min_value=0),
@@ -420,9 +424,13 @@ with st.expander("點擊展開：取得 AI 深度分析指令", expanded=False):
     # 3. 迴圈整理「每日全品項」數據 (高密度格式)
     detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
     
-    if not detail_data.empty:
-        for idx, row in detail_data.iterrows():
+    for idx, row in detail_data.iterrows():
             d_str = row["日期"].strftime("%m/%d")
+            event_note = get_event_info(row["日期"]) # 取得當日活動
+            if event_note:
+                event_str = f" [活動: {event_note}]"
+            else:
+                event_str = ""
             
             # 數值準備
             sales = row['實績PSD']
@@ -439,7 +447,7 @@ with st.expander("點擊展開：取得 AI 深度分析指令", expanded=False):
             fest = row['節慶USD']
             
             # 依照指定格式組裝字串
-            line_str = f"{d_str}: 業績${sales:,.0f} /{rate:.1f}%/ 來客{adt}筆 |客單_${at} /糕點PSD_${p_psd:,.0f}/糕點USD_{p_usd}個/ 報廢USD_{waste}個/Retail商品${retail:,.0f}/NCB_{ncb}杯/BAF/SCHP_{baf}張/節慶禮盒/蛋糕_{fest}個/盒"
+           line_str = f"{d_str}{event_str}: 業績${sales:,.0f} /{rate:.1f}%/ 來客{adt}筆 |客單_${at} /糕點PSD_${p_psd:,.0f}/糕點USD_{p_usd}個/ 報廢USD_{waste}個/Retail商品${retail:,.0f}/NCB_{ncb}杯/BAF/SCHP_{baf}張/節慶禮盒/蛋糕_{fest}個/盒"
             ai_prompt += f"{line_str}\n"
 
         # 4. 計算並加入「區間平均值」 (所有指標的平均)
