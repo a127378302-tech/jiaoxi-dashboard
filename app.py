@@ -218,7 +218,7 @@ with tab2:
             
             "糕點PSD": st.column_config.NumberColumn("糕點業績 PSD", format="$%d"),
             "糕點USD": st.column_config.NumberColumn("糕點銷量 USD", format="%d"),
-            "糕點報廢USD": st.column_config.NumberColumn("糕點報廢 USD", format="%d"),
+            "糕點報廢USD": st.column_config.NumberColumn("糕點報廢 USD (個)", format="%d"),
             "Retail": st.column_config.NumberColumn("Retail 商品", format="$%d"),
             "NCB": st.column_config.NumberColumn("NCB (杯)", format="%d"),
             "BAF": st.column_config.NumberColumn("BAF/SCHP (張)", format="%d"),
@@ -234,27 +234,22 @@ with tab2:
 if st.button("💾 確認更新 (並自動計算)", type="primary"):
     # Tab 1 更新
     for i, row in edited_kpi.iterrows():
-        # 強制將 row["日期"] 轉為 date 物件，確保與 df["日期"] 格式一致
         row_date = pd.to_datetime(row["日期"]).date() if isinstance(row["日期"], (str, pd.Timestamp)) else row["日期"]
         
         mask = df["日期"] == row_date
         
-        if mask.any(): # 確保有找到對應日期
+        if mask.any():
             df.loc[mask, "目標PSD"] = row["目標PSD"]
             df.loc[mask, "實績PSD"] = row["實績PSD"]
             df.loc[mask, "ADT"] = row["ADT"]
             df.loc[mask, "備註"] = row["備註"]
             
-            # --- 關鍵修正：確保計算結果是浮點數 ---
-            # 實績 / 目標 * 100
             t_psd = float(row["目標PSD"]) if row["目標PSD"] > 0 else 1.0
             actual_psd = float(row["實績PSD"])
             
-            # 計算並取小數點後1位
             achievement = round((actual_psd / t_psd) * 100, 1)
             df.loc[mask, "PSD達成率"] = achievement
             
-            # 客單價運算
             cust = float(row["ADT"]) if row["ADT"] > 0 else 1.0
             at_val = actual_psd / cust if row["ADT"] > 0 else 0
             df.loc[mask, "AT"] = int(round(at_val, 0))
@@ -266,21 +261,17 @@ if st.button("💾 確認更新 (並自動計算)", type="primary"):
         cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
         for c in cols: df.loc[mask, c] = row[c]
 
-    # 存檔與更新 Session
     save_data_to_sheet(df)
     st.session_state.df = df
-    
-    # --- 關鍵：強制重新載入頁面，讓計算結果立刻顯示 ---
     st.rerun()
 
-# --- 儀表板數據計算與篩選區 ---
+# --- 儀表板數據計算與篩選區 (已更新：包含週次分析) ---
 st.markdown("---")
 
 # 1. 建立週次資料 (輔助欄位)
-# 將日期轉為 ISO 週次，方便群組化
 current_month_df["Week_Num"] = pd.to_datetime(current_month_df["日期"]).dt.isocalendar().week
 
-# 2. 增加「檢視模式」選擇器 (這是新增的核心功能)
+# 2. 增加「檢視模式」選擇器
 st.subheader("📅 數據檢視範圍")
 col_view, col_week = st.columns([1, 3])
 
@@ -290,32 +281,29 @@ with col_view:
 target_df = current_month_df # 預設為全月資料
 
 if view_mode == "單週分析":
-    # 找出本月有哪些週次
     weeks = sorted(current_month_df["Week_Num"].unique())
     week_options = {}
     
-    # 建立友善的顯示名稱 (例如: Week 2 | 01/05 ~ 01/11)
     for w in weeks:
         week_data = current_month_df[current_month_df["Week_Num"] == w]
-        start_date = week_data["日期"].min().strftime("%m/%d")
-        end_date = week_data["日期"].max().strftime("%m/%d")
-        week_label = f"Week {w} | {start_date} ~ {end_date}"
-        week_options[week_label] = w
+        if not week_data.empty:
+            start_date = week_data["日期"].min().strftime("%m/%d")
+            end_date = week_data["日期"].max().strftime("%m/%d")
+            week_label = f"Week {w} | {start_date} ~ {end_date}"
+            week_options[week_label] = w
     
     with col_week:
-        # 預設選取最後一週 (方便檢視最近數據)
-        selected_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
-        selected_week_num = week_options[selected_label]
-        
-        # 過濾資料：只留下選定該週的數據
-        target_df = current_month_df[current_month_df["Week_Num"] == selected_week_num]
+        if week_options:
+            selected_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
+            selected_week_num = week_options[selected_label]
+            target_df = current_month_df[current_month_df["Week_Num"] == selected_week_num]
+        else:
+            st.warning("本月尚無資料可供分析")
 
-# 3. 基礎運算邏輯 (針對 target_df 進行運算，所以會自動隨選擇變動)
-# 找出「有效營業日」：只計算實績 PSD > 0 的天數
+# 3. 基礎運算邏輯
 valid_days_df = target_df[target_df["實績PSD"] > 0]
 days_count = valid_days_df.shape[0]
 
-# 避免除以 0 的保護機制
 if days_count == 0: 
     days_count = 1
     safe_valid_df = target_df 
@@ -323,11 +311,11 @@ else:
     safe_valid_df = valid_days_df
 
 # [Section 1] 績效看板數據
-total_sales_actual = target_df["實績PSD"].sum()          # 區間累積 SALES
+total_sales_actual = target_df["實績PSD"].sum()
 total_sales_target = target_df["目標PSD"].sum()
 achieve_rate = (total_sales_actual / total_sales_target * 100) if total_sales_target > 0 else 0 
-avg_psd = total_sales_actual / days_count                # 區間平均 PSD
-avg_adt = safe_valid_df["ADT"].mean()                    # 區間平均 ADT
+avg_psd = total_sales_actual / days_count
+avg_adt = safe_valid_df["ADT"].mean()
 total_adt = target_df["ADT"].sum()
 avg_at = total_sales_actual / total_adt if total_adt > 0 else 0 
 
@@ -338,9 +326,10 @@ avg_waste_usd = safe_valid_df["糕點報廢USD"].mean()
 avg_ncb = safe_valid_df["NCB"].mean()                    
 avg_retail = safe_valid_df["Retail"].mean()              
 
-# 顯示目前的檢視狀態 (提示使用者)
+# 顯示目前的檢視狀態
 if view_mode == "單週分析":
-    st.info(f"🔍 目前顯示範圍： **{selected_label}** 之數據分析")
+    if week_options:
+        st.info(f"🔍 目前顯示範圍： **{selected_label}** 之數據分析")
 else:
     st.success(f"🔍 目前顯示範圍： **{selected_month} 月份全月累計**")
 
@@ -362,6 +351,6 @@ k1, k2, k3, k4, k5 = st.columns(5)
 
 k1.metric("平均糕點 PSD", f"${avg_pastry_psd:,.0f}")
 k2.metric("平均糕點 USD", f"{avg_pastry_usd:,.1f} 個")
-k3.metric("平均糕點報廢", f"{avg_waste_usd:,.1f} 個", delta_color="inverse") # 報廢顯示紅色(inverse)提醒
+k3.metric("平均糕點報廢", f"{avg_waste_usd:,.1f} 個", delta_color="inverse")
 k4.metric("平均 NCB", f"{avg_ncb:,.1f} 杯")
 k5.metric("平均 Retail", f"${avg_retail:,.0f}")
