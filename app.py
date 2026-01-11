@@ -171,8 +171,11 @@ with st.sidebar:
     * ☕ **好友分享/BAF**
     """)
 
-# --- [新增功能] 頂部活動大布告欄 ---
-today = datetime.date.today()
+# --- [新增功能] 頂部活動大布告欄 (強制設定為台灣時區) ---
+# 雲端 Server 通常是 UTC，台灣是 UTC+8
+tw_tz = datetime.timezone(datetime.timedelta(hours=8))
+today = datetime.datetime.now(tw_tz).date()
+
 today_event = get_event_info(today)
 if not today_event: today_event = "無特別活動，回歸基本面銷售。"
 
@@ -204,8 +207,8 @@ if "df" not in st.session_state: st.session_state.df = load_data()
 df = st.session_state.df
 if df.empty: st.stop()
 
-# 月份篩選
-current_month = datetime.date.today().month
+# 月份篩選 (預設選取當前台灣時間的月份)
+current_month = today.month
 selected_month = st.selectbox("月份", range(1, 13), index=current_month-1)
 df["Month"] = pd.to_datetime(df["日期"]).dt.month
 current_month_df = df[df["Month"] == selected_month].copy()
@@ -293,7 +296,7 @@ with col_view:
 
 target_df = current_month_df
 if view_mode == "單週分析":
-    # 修正：加回日期區間顯示
+    # 加回日期區間顯示
     weeks = sorted(current_month_df["Week_Num"].unique())
     week_options = {}
     for w in weeks:
