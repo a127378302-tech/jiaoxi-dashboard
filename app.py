@@ -230,7 +230,7 @@ with tab1:
             "ADT": st.column_config.NumberColumn("來客", format="%d"),
             "AT": st.column_config.NumberColumn("客單", disabled=True, format="$%d"),
             "備註": st.column_config.TextColumn("手動備註", width="small"),
-            "當日活動": st.column_config.TextColumn("📅 當日活動 (自動)", disabled=True, width="medium"), # 新增至最右側
+            "當日活動": st.column_config.TextColumn("📅 當日活動 (自動)", disabled=True, width="medium"), 
         },
         use_container_width=True, hide_index=True, num_rows="fixed", key="editor_kpi"
     )
@@ -293,8 +293,17 @@ with col_view:
 
 target_df = current_month_df
 if view_mode == "單週分析":
+    # 修正：加回日期區間顯示
     weeks = sorted(current_month_df["Week_Num"].unique())
-    week_options = {f"Week {w}": w for w in weeks}
+    week_options = {}
+    for w in weeks:
+        week_data = current_month_df[current_month_df["Week_Num"] == w]
+        if not week_data.empty:
+            start_date = week_data["日期"].min().strftime("%m/%d")
+            end_date = week_data["日期"].max().strftime("%m/%d")
+            week_label = f"Week {w} | {start_date} ~ {end_date}"
+            week_options[week_label] = w
+            
     with col_week:
         if week_options:
             sel_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
