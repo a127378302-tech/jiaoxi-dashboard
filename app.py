@@ -355,45 +355,68 @@ k3.metric("平均糕點報廢", f"{avg_waste_usd:,.1f} 個", delta_color="invers
 k4.metric("平均 NCB", f"{avg_ncb:,.1f} 杯")
 k5.metric("平均 Retail", f"${avg_retail:,.0f}")
 
-# --- [新增] AI 分析指令產生器 ---
+# --- [新增/修改] AI 全方位分析指令產生器 ---
 st.markdown("---")
-st.subheader("🤖 呼叫 AI 營運顧問")
+st.subheader("🤖 呼叫 AI 營運顧問 (全方位版)")
 
-with st.expander("點擊展開：取得 AI 分析專用數據包"):
-    st.info("💡 說明：請複製下方文字，貼給 ChatGPT / Gemini，即可獲得專業營運建議。")
+with st.expander("點擊展開：取得 AI 深度分析指令", expanded=False):
+    st.info("💡 說明：此指令包含「每日各品項詳細數據」，複製貼上後，AI 能幫你進行如「Retail 佔比分析」、「來客與杯數轉換率」等深度診斷。")
     
-    # 1. 整理標頭資訊
+    # 1. 整理標頭與區間資訊
     if view_mode == "單週分析" and week_options:
         period_info = f"2026年 {selected_label}"
     else:
         period_info = f"2026年 {selected_month}月 (全月累計)"
     
-    # 2. 整理核心數據字串
-    ai_prompt = f"""我是星巴克店經理，請協助我分析以下門市營運數據，並給出具體改善建議。
-    
-【分析區間】：{period_info}
+    # 2. 建立 AI Prompt 開頭
+    ai_prompt = f"""我是星巴克店經理，請擔任我的專業營運顧問。
+這是我門市在【{period_info}】的詳細營運數據。
 
-【核心績效】：
-- 業績達成率：{achieve_rate:.1f}% (目標 {total_sales_target:,.0f} / 實績 {total_sales_actual:,.0f})
-- 平均來客數 (ADT)：{avg_adt:.0f} 人
-- 平均客單價 (AT)：${avg_at:.0f}
-- 糕點報廢 (Waste)：平均每日 {avg_waste_usd:.1f} 個
+請協助我進行「深度歸因分析」，找出業績好或不好的具體原因（是靠來客數？還是靠高單價商品？或是浪費控制得宜？），並給我下週具體的排班或訂貨建議。
 
-【每日明細數據 (Date | PSD | ADT | Waste)】：
+【📊 期間總體績效】：
+- 總業績 (Sales)：${total_sales_actual:,.0f} (達成率 {achieve_rate:.1f}%)
+- 總來客 (Total ADT)：{total_adt:,.0f} 人
+- 平均客單 (Avg AT)：${avg_at:.0f}
+- 總報廢 (Total Waste)：{safe_valid_df['糕點報廢USD'].sum():,.0f} 個
+
+【📅 每日詳細數據 (請依此進行交叉分析)】：
 """
     
-    # 3. 整理每日明細 (只列出有數據的日子)
+    # 3. 迴圈整理「每日全品項」數據
     # 依據目前篩選的 target_df 來列表
     detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
     
     if not detail_data.empty:
         for idx, row in detail_data.iterrows():
-            d_str = row["日期"].strftime("%m/%d")
-            ai_prompt += f"- {d_str}: 業績${row['實績PSD']:,.0f} | 來客{row['ADT']} | 報廢${row['糕點報廢USD']}\n"
+            # 日期處理
+            d_obj = pd.to_datetime(row["日期"])
+            d_str = d_obj.strftime("%m/%d")
+            week_char = ["(一)", "(二)", "(三)", "(四)", "(五)", "(六)", "(日)"][d_obj.weekday()]
+            
+            # 計算當日達成率
+            daily_target = row['目標PSD']
+            daily_actual = row['實績PSD']
+            daily_achieve = (daily_actual / daily_target * 100) if daily_target > 0 else 0
+            
+            # 組合字串 (使用結構化格式讓 AI 更好讀)
+            ai_prompt += f"""
+🔴 {d_str} {week_char}
+   - [核心]: 業績 ${daily_actual:,.0f} (達成率 {daily_achieve:.1f}%) | 目標 ${daily_target:,.0f} | 來客 {row['ADT']} | AT ${row['AT']}
+   - [商品]: 糕點 ${row['糕點PSD']} (銷量{row['糕點USD']}) | Retail ${row['Retail']} | 節慶 ${row['節慶USD']}
+   - [營運]: NCB {row['NCB']}杯 | 報廢 {row['糕點報廢USD']}個 | BAF {row['BAF']}張
+   - [備註]: {row['備註']}
+"""
     else:
-        ai_prompt += "(此區間尚無詳細數據)"
+        ai_prompt += "\n(此區間尚無詳細數據)"
 
-    ai_prompt += "\n請針對「業績缺口」、「報廢控制」與「來客數趨勢」進行點評，並給我下週的操作建議。"
+    ai_prompt += """
+---
+【請回答以下問題】：
+1. **成效亮點與痛點**：哪幾天表現最好/最差？主要受哪個指標影響（是 Retail 沒賣動？還是來客數太低）？
+2. **機會點分析**：觀察「糕點報廢」與「NCB 杯數」的關係，是否有調整訂貨或促銷的空間？
+3. **下週行動建議**：針對上述發現，給值班經理 3 個具體的執行重點。
+"""
 
     # 4. 顯示複製區塊
     st.code(ai_prompt, language="text")
