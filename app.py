@@ -142,15 +142,27 @@ def initialize_festival_sheet(sheet):
     return df
 
 @st.cache_data(ttl=60)
-def load_data(worksheet_name="sheet1"):
+def load_data(worksheet_name="工作表1"):
     try:
+        # 嘗試連線
         sheet = get_google_sheet_data(worksheet_name)
+        
+        # 如果連線失敗 (sheet 是 None)，直接回傳空 DataFrame 或範例，不要讓程式崩潰
+        if sheet is None:
+            if worksheet_name == "Festival_Control":
+                # 回傳一個空的範例結構，讓網頁能顯示
+                cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+                return pd.DataFrame([["2026春節(範例)", "海苔肉鬆薄餅", 100, 0, 0, 0, 0, "連線失敗，僅顯示範例"]], columns=cols)
+            return pd.DataFrame()
+
         data = sheet.get_all_records()
         
-        if worksheet_name == "sheet1":
+        # 邏輯 A: 讀取主營運表
+        if worksheet_name == "工作表1" or worksheet_name == "sheet1":
             if not data: return initialize_sheet(sheet)
             df = pd.DataFrame(data)
             required = ['日期', '目標PSD', '實績PSD']
+            # 欄位檢查：若欄位不對，初始化
             if not all(c in df.columns for c in required): return initialize_sheet(sheet)
             
             df["日期"] = pd.to_datetime(df["日期"]).dt.date
@@ -158,20 +170,27 @@ def load_data(worksheet_name="sheet1"):
             for col in numeric_cols:
                 if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            # 不存入 Sheet，僅顯示用
             df["當日活動"] = df["日期"].apply(lambda x: get_event_info(x))
             return df
 
+        # 邏輯 B: 讀取節慶禮盒表 (這就是我們要修復的重點)
         elif worksheet_name == "Festival_Control":
+            # 如果表是空的，初始化它
             if not data: return initialize_festival_sheet(sheet)
+            
             df = pd.DataFrame(data)
+            # 強制轉換數值欄位，避免文字導致計算錯誤
             num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']
             for c in num_cols:
                  if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
             return df
 
     except Exception as e:
-        st.error(f"讀取錯誤 ({worksheet_name}): {e}")
+        # 發生任何錯誤時，印出錯誤但不要停止程式，回傳範例資料讓介面能跑出來
+        st.error(f"讀取 {worksheet_name} 發生錯誤: {e}")
+        if worksheet_name == "Festival_Control":
+            cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+            return pd.DataFrame(columns=cols)
         return pd.DataFrame()
 
 def save_data_to_sheet(df, worksheet_name="sheet1"):
