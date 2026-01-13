@@ -302,39 +302,46 @@ with tab3:
     st.markdown("#### 🎁 節慶禮盒控管")
     st.caption("追蹤訂貨進度：**剩餘可訂** = 目標控量 - 已訂貨。")
     
-    all_seasons = df_fest['檔期'].unique() if not df_fest.empty else ["2026春節"]
+    # 防止讀取失敗的保護機制：如果 df_fest 是空的，先給一個預設值
+    if df_fest.empty:
+        st.warning("⚠️ 尚未讀取到資料，請確認 Google Sheet 是否已有 'Festival_Control' 分頁。")
+        all_seasons = ["2026春節"]
+    else:
+        all_seasons = df_fest['檔期'].unique()
+    
     selected_season = st.selectbox("選擇檔期", all_seasons, key="season_select")
     
-    display_fest_df = df_fest[df_fest['檔期'] == selected_season].copy()
-    display_fest_df['剩餘可訂量'] = display_fest_df['目標控量(總量)'] - display_fest_df['已訂貨(入庫)']
-    display_fest_df['訂貨進度'] = display_fest_df.apply(lambda x: x['已訂貨(入庫)'] / x['目標控量(總量)'] if x['目標控量(總量)'] > 0 else 0, axis=1)
-    
-    edited_fest = st.data_editor(
-        display_fest_df,
-        column_config={
-            "檔期": st.column_config.TextColumn(disabled=True),
-            "品項名稱": st.column_config.TextColumn(width="medium", required=True),
-            "目標控量(總量)": st.column_config.NumberColumn("🎯 目標", min_value=0),
-            "已訂貨(入庫)": st.column_config.NumberColumn("📦 已訂貨", min_value=0),
-            "調入(+)": st.column_config.NumberColumn("調入 (+)", min_value=0),
-            "調出(-)": st.column_config.NumberColumn("調出 (-)", min_value=0),
-            "剩餘可訂量": st.column_config.NumberColumn("🚀 剩餘", disabled=True),
-            "訂貨進度": st.column_config.ProgressColumn("進度", format="%.0f%%", min_value=0, max_value=1),
-            "目前庫存(估)": st.column_config.NumberColumn("庫存", disabled=True),
-            "備註": st.column_config.TextColumn(width="medium")
-        },
-        use_container_width=True, num_rows="dynamic", key="editor_fest"
-    )
-    
-    # 禮盒 Dashboard
-    total_quota = edited_fest['目標控量(總量)'].sum()
-    total_ordered = edited_fest['已訂貨(入庫)'].sum()
-    f1, f2, f3, f4 = st.columns(4)
-    f1.metric("總控量目標", f"{total_quota:,.0f}")
-    f2.metric("已訂貨總數", f"{total_ordered:,.0f}", delta=f"{total_ordered/total_quota*100:.1f}%" if total_quota>0 else "0%")
-    f3.metric("剩餘可訂", f"{total_quota - total_ordered:,.0f}")
-    f4.metric("調撥淨額", f"{edited_fest['調入(+)'].sum() - edited_fest['調出(-)'].sum():+,.0f}")
-
+    # 顯示編輯器
+    if not df_fest.empty:
+        display_fest_df = df_fest[df_fest['檔期'] == selected_season].copy()
+        display_fest_df['剩餘可訂量'] = display_fest_df['目標控量(總量)'] - display_fest_df['已訂貨(入庫)']
+        display_fest_df['訂貨進度'] = display_fest_df.apply(lambda x: x['已訂貨(入庫)'] / x['目標控量(總量)'] if x['目標控量(總量)'] > 0 else 0, axis=1)
+        
+        edited_fest = st.data_editor(
+            display_fest_df,
+            column_config={
+                "檔期": st.column_config.TextColumn(disabled=True),
+                "品項名稱": st.column_config.TextColumn(width="medium", required=True),
+                "目標控量(總量)": st.column_config.NumberColumn("🎯 目標", min_value=0),
+                "已訂貨(入庫)": st.column_config.NumberColumn("📦 已訂貨", min_value=0),
+                "調入(+)": st.column_config.NumberColumn("調入 (+)", min_value=0),
+                "調出(-)": st.column_config.NumberColumn("調出 (-)", min_value=0),
+                "剩餘可訂量": st.column_config.NumberColumn("🚀 剩餘", disabled=True),
+                "訂貨進度": st.column_config.ProgressColumn("進度", format="%.0f%%", min_value=0, max_value=1),
+                "目前庫存(估)": st.column_config.NumberColumn("庫存", disabled=True),
+                "備註": st.column_config.TextColumn(width="medium")
+            },
+            use_container_width=True, num_rows="dynamic", key="editor_fest"
+        )
+        
+        # 禮盒 Dashboard
+        total_quota = edited_fest['目標控量(總量)'].sum()
+        total_ordered = edited_fest['已訂貨(入庫)'].sum()
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric("總控量目標", f"{total_quota:,.0f}")
+        f2.metric("已訂貨總數", f"{total_ordered:,.0f}", delta=f"{total_ordered/total_quota*100:.1f}%" if total_quota>0 else "0%")
+        f3.metric("剩餘可訂", f"{total_quota - total_ordered:,.0f}")
+        f4.metric("調撥淨額", f"{edited_fest['調入(+)'].sum() - edited_fest['調出(-)'].sum():+,.0f}")
 # --- 儲存按鈕 ---
 col_save_1, col_save_2 = st.columns([1, 4])
 if col_save_1.button("💾 確認更新 (Tab 1 & 2)", type="primary"):
