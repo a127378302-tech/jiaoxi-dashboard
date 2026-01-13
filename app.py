@@ -139,35 +139,42 @@ def load_kpi_data():
 
 @st.cache_data(ttl=5)
 def load_festival_data():
-    """簡單直接地讀取禮盒資料，不做任何篩選，就像讀取業績一樣"""
+    """讀取節慶禮盒資料 (包含剩餘控量)"""
     try:
         client = get_gspread_client()
         spreadsheet = client.open("Jiaoxi_2026_Data")
         try:
             sheet = spreadsheet.worksheet("Festival_Control")
             data = sheet.get_all_records()
-            # 定義標準欄位
-            cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '備註']
+            # 必須包含這些欄位
+            cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '剩餘可訂量', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
             
             if not data:
                 return pd.DataFrame(columns=cols)
             
             df = pd.DataFrame(data)
             
-            # 確保所有標準欄位都在，缺的補上
+            # 補齊缺失欄位
             for c in cols:
                 if c not in df.columns:
-                    df[c] = "" if c in ['檔期', '品項名稱', '備註'] else 0
+                    if c in ['檔期', '品項名稱', '備註']:
+                        df[c] = ""
+                    else:
+                        df[c] = 0
 
-            # 強制轉數值 (防呆)
-            num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']
+            # 強制轉數值
+            num_cols = ['目標控量(總量)', '已訂貨(入庫)', '剩餘可訂量', '調入(+)', '調出(-)', '目前庫存(估)']
             for c in num_cols:
                  df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
                  
-            return df[cols] # 只回傳標準欄位
+            # 重新計算一次剩餘控量 (防止 Excel 裡面的數字是舊的)
+            df['剩餘可訂量'] = df['目標控量(總量)'] - df['已訂貨(入庫)']
+            df['目前庫存(估)'] = df['已訂貨(入庫)'] + df['調入(+)'] - df['調出(-)']
+
+            return df[cols]
             
         except gspread.WorksheetNotFound:
-            return None # 標記為未建立
+            return None
             
     except Exception as e:
         st.error(f"禮盒資料讀取錯誤: {e}")
@@ -188,20 +195,22 @@ def save_data(df, target="kpi"):
             sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
             
         elif target == "festival":
-            # 禮盒存檔邏輯：全量覆蓋 (最穩定)
             try:
                 sheet = spreadsheet.worksheet("Festival_Control")
             except gspread.WorksheetNotFound:
                 sheet = spreadsheet.add_worksheet(title="Festival_Control", rows="100", cols="20")
             
-            # 確保欄位順序與類型正確
-            save_cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '備註']
+            # 確保欄位完整
+            save_cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '剩餘可訂量', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
             save_df = df[save_cols].copy()
             
-            # 數值填0
+            # 存檔前再計算一次 (確保 Google Sheet 裡的數據也是對的)
             num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']
             for c in num_cols:
                 save_df[c] = pd.to_numeric(save_df[c], errors='coerce').fillna(0)
+            
+            save_df['剩餘可訂量'] = save_df['目標控量(總量)'] - save_df['已訂貨(入庫)']
+            save_df['目前庫存(估)'] = save_df['已訂貨(入庫)'] + save_df['調入(+)'] - save_df['調出(-)']
             
             # 文字填空
             str_cols = ['檔期', '品項名稱', '備註']
@@ -322,30 +331,16 @@ with tab2:
 with tab3:
     st.markdown("#### 🎁 節慶禮盒與商品控管")
     
-    # 判斷是否成功讀取到禮盒表
+    # 初始化判斷
     if df_fest is None:
         st.warning("⚠️ 尚未偵測到 'Festival_Control' 分頁。請直接在下方新增資料，按下【更新禮盒】後系統會自動建立。")
-        # 建立初始化空表 (必須包含所有必要欄位)
-        cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '備註']
-        display_fest_df = pd.DataFrame(columns=cols)
-        # 加一行範例讓使用者知道怎麼填
-        display_fest_df.loc[0] = ["2026春節", "海苔肉鬆薄餅(範例)", 100, 0, 0, 0, ""]
+        cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '剩餘可訂量', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+        display_fest_df = pd.DataFrame([["2026春節", "海苔肉鬆薄餅(範例)", 100, 0, 100, 0, 0, 0, ""]], columns=cols)
     else:
-        # 直接使用讀取到的資料，不做任何篩選
+        # 載入現有資料
         display_fest_df = df_fest.copy()
 
-    # 計算輔助欄位 (只在網頁顯示，不存回 Sheet)
-    # 先確保數值欄位是數字
-    for col in ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']:
-        display_fest_df[col] = pd.to_numeric(display_fest_df[col], errors='coerce').fillna(0)
-
-    display_fest_df['剩餘可訂量'] = display_fest_df['目標控量(總量)'] - display_fest_df['已訂貨(入庫)']
-    display_fest_df['目前庫存(估)'] = display_fest_df['已訂貨(入庫)'] + display_fest_df['調入(+)'] - display_fest_df['調出(-)']
-    
-    # 計算訂貨進度 (0~1)
-    display_fest_df['訂貨進度'] = display_fest_df.apply(lambda x: x['已訂貨(入庫)'] / x['目標控量(總量)'] if x['目標控量(總量)'] > 0 else 0, axis=1)
-
-    # 顯示編輯器
+    # 編輯器設定
     edited_fest = st.data_editor(
         display_fest_df,
         column_config={
@@ -353,23 +348,37 @@ with tab3:
             "品項名稱": st.column_config.TextColumn(width="medium", required=True),
             "目標控量(總量)": st.column_config.NumberColumn("🎯 目標", min_value=0),
             "已訂貨(入庫)": st.column_config.NumberColumn("📦 已訂貨", min_value=0),
+            # [修正] 剩餘量設為 disabled=True，讓使用者知道這是算出來的
+            "剩餘可訂量": st.column_config.NumberColumn("🚀 剩餘 (自動算)", disabled=True),
             "調入(+)": st.column_config.NumberColumn("調入 (+)", min_value=0),
             "調出(-)": st.column_config.NumberColumn("調出 (-)", min_value=0),
-            "剩餘可訂量": st.column_config.NumberColumn("🚀 剩餘", disabled=True),
-            "訂貨進度": st.column_config.ProgressColumn("進度", format="%.0f%%", min_value=0, max_value=1),
-            "目前庫存(估)": st.column_config.NumberColumn("庫存水位", disabled=True),
+            "目前庫存(估)": st.column_config.NumberColumn("庫存水位 (自動算)", disabled=True),
             "備註": st.column_config.TextColumn(width="medium")
         },
         use_container_width=True, 
-        num_rows="dynamic", # 允許新增刪除
+        num_rows="dynamic",
         key="editor_fest"
     )
     
-    # 簡單統計
+    # [即時計算邏輯]
+    # 使用 edited_fest (使用者編輯後的資料) 來計算統計數據
     if not edited_fest.empty:
-        total_quota = edited_fest['目標控量(總量)'].sum()
-        total_ordered = edited_fest['已訂貨(入庫)'].sum()
-        st.caption(f"📊 總計：目標控量 {total_quota:,.0f} 盒 | 已訂貨 {total_ordered:,.0f} 盒")
+        # 強制轉數值進行計算
+        temp_df = edited_fest.copy()
+        for c in ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']:
+            temp_df[c] = pd.to_numeric(temp_df[c], errors='coerce').fillna(0)
+            
+        total_quota = temp_df['目標控量(總量)'].sum()
+        total_ordered = temp_df['已訂貨(入庫)'].sum()
+        total_remaining = total_quota - total_ordered
+        
+        st.markdown("---")
+        st.caption("📊 即時統計 (輸入上方數字後，下方自動更新)")
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric("總控量目標", f"{total_quota:,.0f} 盒")
+        f2.metric("已訂貨總數", f"{total_ordered:,.0f} 盒", delta=f"{total_ordered/total_quota*100:.1f}%" if total_quota>0 else "0%")
+        f3.metric("總剩餘可訂", f"{total_remaining:,.0f} 盒", delta_color="normal")
+        f4.metric("庫存水位", f"{total_ordered + temp_df['調入(+)'].sum() - temp_df['調出(-)'].sum():,.0f} 盒")
 
 # --- 儲存區 ---
 col_save_1, col_save_2 = st.columns([1, 4])
