@@ -4,7 +4,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import datetime
 
-# --- 1. 設定網頁與樣式 (必須放在最前面) ---
+# --- 1. 設定網頁與樣式 ---
 st.set_page_config(page_title="星巴克礁溪門市 | 營運戰情室", page_icon="☕", layout="wide")
 
 st.markdown("""
@@ -88,7 +88,7 @@ def get_event_info(date_input):
     d_str = str(date_input)
     return MARKETING_CALENDAR.get(d_str, "")
 
-# --- 3. Google Sheet 連線與資料處理 (Robust Version) ---
+# --- 3. Google Sheet 連線與資料處理 ---
 def get_gspread_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
@@ -135,7 +135,7 @@ def load_kpi_data():
         df["當日活動"] = df["日期"].apply(lambda x: get_event_info(x))
         return df
     except Exception as e:
-        st.error(f"⚠️ 核心業績資料讀取失敗 (請檢查網路或 Sheet): {e}")
+        st.error(f"⚠️ 核心業績資料讀取失敗: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=60)
@@ -153,15 +153,15 @@ def load_festival_data():
             
             df = pd.DataFrame(data)
             num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']
+            # 修正：這裡的變數名稱修正為 c
             for c in num_cols:
-                 if c in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                 if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
             return df
             
         except gspread.WorksheetNotFound:
-            return None # 標記為未建立
+            return None 
             
     except Exception as e:
-        # 回傳空表避免當機
         return pd.DataFrame()
 
 def save_data(df, target="kpi"):
@@ -172,9 +172,8 @@ def save_data(df, target="kpi"):
         if target == "kpi":
             sheet = spreadsheet.sheet1
             save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', '備註']
-            # [重要修正] 強制填滿空值，避免 NaN 導致存檔失敗
             save_df = df[save_cols].copy().fillna(0)
-            save_df["備註"] = save_df["備註"].astype(str).replace("0", "") # 備註不填0
+            save_df["備註"] = save_df["備註"].astype(str).replace("0", "") 
             save_df["日期"] = save_df["日期"].astype(str)
             
             sheet.clear()
@@ -186,16 +185,13 @@ def save_data(df, target="kpi"):
             except gspread.WorksheetNotFound:
                 sheet = spreadsheet.add_worksheet(title="Festival_Control", rows="100", cols="20")
             
-            # [重要修正] 強制填滿空值
             save_cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
             save_df = df[save_cols].copy()
             
-            # 數值欄位填 0
             num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)']
             for c in num_cols:
                 if c in save_df.columns: save_df[c] = pd.to_numeric(save_df[c], errors='coerce').fillna(0)
             
-            # 文字欄位填空字串
             str_cols = ['檔期', '品項名稱', '備註']
             for c in str_cols:
                 if c in save_df.columns: save_df[c] = save_df[c].fillna("").astype(str)
@@ -206,7 +202,7 @@ def save_data(df, target="kpi"):
         st.toast("✅ 數據已更新！", icon="💾")
         st.cache_data.clear()
     except Exception as e:
-        st.error(f"儲存失敗 (詳細錯誤): {e}")
+        st.error(f"儲存失敗: {e}")
 
 # --- 4. 主程式 ---
 
@@ -239,15 +235,308 @@ for i in range(1, 4):
         d_str = future_date.strftime('%m/%d')
         upcoming_text.append(f"<b>{d_str}</b>: {evt}")
 
+# 簡化 HTML 組合，避免 f-string 錯誤
+upcoming_html = ' &nbsp;|&nbsp; '.join(upcoming_text) if upcoming_text else "近期無大型檔期"
+
 st.title("☕ 2026 礁溪門市營運戰情室")
 
+# 使用安全的字串組合方式
 st.markdown(f"""
 <div class="activity-box">
     <div class="activity-title">📢 門市活動快訊 (Today: {today.strftime('%m/%d')})</div>
     <div style="font-size: 1.5em; color: #333; margin: 10px 0;">👉 今日重點：{today_event}</div>
     <hr style="border-top: 1px dashed #ccc;">
     <div style="color: #666;">
-        <b>🔜 未來預告：</b> {' &nbsp;|&nbsp; '.join(upcoming_text) if upcoming_text else "近期無大型檔期"}
+        <b>🔜 未來預告：</b> {upcoming_html}
     </div>
 </div>
-""", unsafe
+""", unsafe_allow_html=True)
+
+# --- 載入資料 ---
+if "df" not in st.session_state: st.session_state.df = load_kpi_data()
+if "df_fest" not in st.session_state: st.session_state.df_fest = load_festival_data()
+
+df = st.session_state.df
+df_fest = st.session_state.df_fest
+
+if df.empty:
+    st.error("❌ 無法讀取業績資料，請檢查 Google Sheet 權限或網路連線。")
+    st.stop()
+
+# 月份篩選
+current_month = today.month
+selected_month = st.selectbox("月份", range(1, 13), index=current_month-1)
+df["Month"] = pd.to_datetime(df["日期"]).dt.month
+current_month_df = df[df["Month"] == selected_month].copy()
+if not current_month_df.empty:
+    current_month_df["顯示日期"] = current_month_df["日期"].apply(get_date_display)
+
+# --- 數據輸入區 ---
+st.subheader(f"📝 {selected_month} 月數據與管理")
+
+tab1, tab2, tab3 = st.tabs(["📊 核心業績", "🥐 商品與庫存", "🎁 節慶禮盒控管"])
+
+with tab1:
+    st.caption("輸入說明：右側「當日活動」為系統自動帶入。")
+    edited_kpi = st.data_editor(
+        current_month_df[['顯示日期', '日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '備註', '當日活動']],
+        column_config={
+            "顯示日期": st.column_config.TextColumn("日期", disabled=True, width="small"),
+            "日期": None,
+            "目標PSD": st.column_config.NumberColumn("目標", format="$%d"),
+            "實績PSD": st.column_config.NumberColumn("實績", format="$%d"),
+            "PSD達成率": st.column_config.NumberColumn("達成%", disabled=True, format="%.1f%%"),
+            "ADT": st.column_config.NumberColumn("來客", format="%d"),
+            "AT": st.column_config.NumberColumn("客單", disabled=True, format="$%d"),
+            "備註": st.column_config.TextColumn("備註", width="small"),
+            "當日活動": st.column_config.TextColumn("📅 當日活動 (自動)", disabled=True, width="medium"), 
+        },
+        use_container_width=True, hide_index=True, num_rows="fixed", key="editor_kpi"
+    )
+
+with tab2:
+    edited_prod = st.data_editor(
+        current_month_df[['顯示日期', '日期', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']],
+        column_config={
+            "顯示日期": st.column_config.TextColumn("日期", disabled=True, width="small"),
+            "日期": None,
+            "糕點PSD": st.column_config.NumberColumn("糕點業績", format="$%d"),
+            "糕點USD": st.column_config.NumberColumn("糕點銷量", format="%d"),
+            "糕點報廢USD": st.column_config.NumberColumn("報廢(個)", format="%d"),
+            "Retail": st.column_config.NumberColumn("Retail", format="$%d"),
+            "NCB": st.column_config.NumberColumn("NCB", format="%d"),
+            "BAF": st.column_config.NumberColumn("BAF", format="%d"),
+            "節慶USD": st.column_config.NumberColumn("節慶", format="%d"),
+        },
+        use_container_width=True, hide_index=True, num_rows="fixed", key="editor_prod"
+    )
+
+with tab3:
+    st.markdown("#### 🎁 節慶禮盒訂貨/調撥管理")
+    
+    # 1. 準備檔期清單
+    if df_fest is None or df_fest.empty:
+        existing_seasons = []
+    else:
+        existing_seasons = sorted(list(set(df_fest['檔期'].dropna().astype(str).unique())))
+        existing_seasons = [x for x in existing_seasons if x.strip() != ""] 
+
+    # 2. 檔期選擇與新增
+    col_sel, col_add = st.columns([2, 1])
+    
+    with col_sel:
+        idx = 0
+        if "target_season" in st.session_state and st.session_state.target_season in existing_seasons:
+            idx = existing_seasons.index(st.session_state.target_season)
+        
+        options = existing_seasons if existing_seasons else ["(請新增檔期)"]
+        selected_season_opt = st.selectbox("📂 選擇現有檔期", options, index=idx)
+
+    with col_add:
+        new_season_name = st.text_input("➕ 或建立新檔期 (輸入後按 Enter)")
+
+    # 3. 決定操作檔期
+    current_active_season = None
+    if new_season_name.strip():
+        current_active_season = new_season_name.strip()
+        st.info(f"🆕 準備建立新檔期：**{current_active_season}** (請填寫下方資料後按儲存)")
+    elif selected_season_opt != "(請新增檔期)":
+        current_active_season = selected_season_opt
+
+    # 4. 資料過濾
+    if current_active_season and df_fest is not None and not df_fest.empty and '檔期' in df_fest.columns:
+        display_fest_df = df_fest[df_fest['檔期'] == current_active_season].copy()
+    else:
+        cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+        display_fest_df = pd.DataFrame(columns=cols)
+
+    # 補足數值欄位
+    for col in ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']:
+        if col not in display_fest_df.columns: display_fest_df[col] = 0
+    
+    display_fest_df['剩餘可訂量'] = display_fest_df['目標控量(總量)'] - display_fest_df['已訂貨(入庫)']
+    display_fest_df['訂貨進度'] = display_fest_df.apply(lambda x: x['已訂貨(入庫)'] / x['目標控量(總量)'] if x['目標控量(總量)'] > 0 else 0, axis=1)
+
+    edited_fest = st.data_editor(
+        display_fest_df,
+        column_config={
+            "檔期": st.column_config.TextColumn(disabled=True),
+            "品項名稱": st.column_config.TextColumn(width="medium", required=True),
+            "目標控量(總量)": st.column_config.NumberColumn("🎯 目標", min_value=0),
+            "已訂貨(入庫)": st.column_config.NumberColumn("📦 已訂貨", min_value=0),
+            "調入(+)": st.column_config.NumberColumn("調入 (+)", min_value=0),
+            "調出(-)": st.column_config.NumberColumn("調出 (-)", min_value=0),
+            "剩餘可訂量": st.column_config.NumberColumn("🚀 剩餘", disabled=True),
+            "訂貨進度": st.column_config.ProgressColumn("進度", format="%.0f%%", min_value=0, max_value=1),
+            "目前庫存(估)": st.column_config.NumberColumn("庫存", disabled=True),
+            "備註": st.column_config.TextColumn(width="medium")
+        },
+        use_container_width=True, num_rows="dynamic", key="editor_fest"
+    )
+    
+    # 統計看板
+    total_quota = edited_fest['目標控量(總量)'].sum()
+    total_ordered = edited_fest['已訂貨(入庫)'].sum()
+    f1, f2, f3, f4 = st.columns(4)
+    f1.metric("總控量目標", f"{total_quota:,.0f}")
+    f2.metric("已訂貨總數", f"{total_ordered:,.0f}", delta=f"{total_ordered/total_quota*100:.1f}%" if total_quota>0 else "0%")
+    f3.metric("剩餘可訂", f"{total_quota - total_ordered:,.0f}")
+    f4.metric("調撥淨額", f"{edited_fest['調入(+)'].sum() - edited_fest['調出(-)'].sum():+,.0f}")
+
+# --- 儲存區 ---
+col_save_1, col_save_2 = st.columns([1, 4])
+
+if col_save_1.button("💾 更新業績 (Tab 1&2)", type="primary"):
+    for i, row in edited_kpi.iterrows():
+        row_date = row["日期"]
+        mask = df["日期"] == row_date
+        if mask.any():
+            df.loc[mask, "目標PSD"] = row["目標PSD"]
+            df.loc[mask, "實績PSD"] = row["實績PSD"]
+            df.loc[mask, "ADT"] = row["ADT"]
+            df.loc[mask, "備註"] = row["備註"]
+            
+            t_psd = float(row["目標PSD"]) if row["目標PSD"] > 0 else 1.0
+            actual_psd = float(row["實績PSD"])
+            df.loc[mask, "PSD達成率"] = round((actual_psd / t_psd) * 100, 1)
+            
+            cust = float(row["ADT"]) if row["ADT"] > 0 else 1.0
+            df.loc[mask, "AT"] = int(round(actual_psd / cust, 0)) if row["ADT"] > 0 else 0
+
+    for i, row in edited_prod.iterrows():
+        row_date = row["日期"]
+        mask = df["日期"] == row_date
+        cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
+        for c in cols: df.loc[mask, c] = row[c]
+
+    save_data(df, "kpi")
+    st.session_state.df = df
+    st.rerun()
+
+if col_save_2.button("🎁 更新禮盒 (Tab 3)"):
+    if current_active_season:
+        # 標記檔期
+        edited_fest['檔期'] = current_active_season
+        
+        # 合併資料
+        original_fest = st.session_state.df_fest
+        if original_fest is not None and not original_fest.empty and '檔期' in original_fest.columns:
+            other_data = original_fest[original_fest['檔期'] != current_active_season]
+            final_save_df = pd.concat([other_data, edited_fest], ignore_index=True)
+        else:
+            final_save_df = edited_fest
+            
+        # 欄位補齊與清理
+        save_cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+        for c in save_cols:
+            if c not in final_save_df.columns: final_save_df[c] = ""
+            
+        final_save_df = final_save_df[save_cols]
+        
+        st.session_state.target_season = current_active_season
+        st.session_state.df_fest = final_save_df
+        
+        save_data(final_save_df, "festival")
+        st.rerun()
+    else:
+        st.warning("請先選擇或輸入檔期名稱。")
+
+# --- 分析區 ---
+st.markdown("---")
+current_month_df["Week_Num"] = pd.to_datetime(current_month_df["日期"]).dt.isocalendar().week
+st.subheader("📅 數據檢視與 AI 分析")
+col_view, col_week = st.columns([1, 3])
+
+with col_view:
+    view_mode = st.radio("選擇模式", ["全月累計", "單週分析"], horizontal=True, label_visibility="collapsed")
+
+target_df = current_month_df
+if view_mode == "單週分析":
+    weeks = sorted(current_month_df["Week_Num"].unique())
+    week_options = {}
+    for w in weeks:
+        week_data = current_month_df[current_month_df["Week_Num"] == w]
+        if not week_data.empty:
+            start_date = week_data["日期"].min().strftime("%m/%d")
+            end_date = week_data["日期"].max().strftime("%m/%d")
+            week_label = f"Week {w} | {start_date} ~ {end_date}"
+            week_options[week_label] = w
+            
+    with col_week:
+        if week_options:
+            sel_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
+            target_df = current_month_df[current_month_df["Week_Num"] == week_options[sel_label]]
+
+# 計算邏輯
+valid_df = target_df[target_df["實績PSD"] > 0]
+days_count = max(valid_df.shape[0], 1)
+
+total_sales = target_df["實績PSD"].sum()
+total_target = target_df["目標PSD"].sum()
+achieve_rate = (total_sales / total_target * 100) if total_target > 0 else 0
+avg_adt = valid_df["ADT"].mean() if not valid_df.empty else 0
+total_adt = target_df["ADT"].sum()
+avg_at = total_sales / total_adt if total_adt > 0 else 0
+
+# 顯示看版
+st.markdown("##### 🏆 績效看板")
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("累積 SALES", f"${total_sales:,.0f}")
+m2.metric("達成率", f"{achieve_rate:.1f}%", delta=f"${total_sales - total_target:,.0f}")
+m3.metric("平均 PSD", f"${total_sales/days_count:,.0f}")
+m4.metric("平均 ADT", f"{avg_adt:,.0f}")
+m5.metric("平均 AT", f"${avg_at:,.0f}")
+
+# 關鍵指標
+st.markdown("##### ⚡ 關鍵指標 (日平均)")
+k1, k2, k3, k4, k5 = st.columns(5)
+if not valid_df.empty:
+    k1.metric("糕點 PSD", f"${valid_df['糕點PSD'].mean():,.0f}")
+    k2.metric("糕點 USD", f"{valid_df['糕點USD'].mean():.1f} 個")
+    k3.metric("糕點報廢", f"{valid_df['糕點報廢USD'].mean():.1f} 個", delta_color="inverse")
+    k4.metric("NCB 杯數", f"{valid_df['NCB'].mean():.1f}")
+    k5.metric("Retail", f"${valid_df['Retail'].mean():,.0f}")
+
+# --- AI 分析 ---
+st.markdown("---")
+st.subheader("🤖 呼叫 AI 營運顧問")
+
+with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
+    period_str = f"2026年 {selected_month}月 ({view_mode})"
+    
+    ai_prompt = f"""我是星巴克店經理，請協助分析本門市數據。
+【分析區間】：{period_str}
+
+【每日詳細數據】：
+(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶, 活動：名稱)
+"""
+    
+    detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
+    
+    if not detail_data.empty:
+        for idx, row in detail_data.iterrows():
+            d_str = row["日期"].strftime("%m/%d")
+            sales = row['實績PSD']
+            target = row['目標PSD']
+            rate = (sales / target * 100) if target > 0 else 0
+            
+            evt_name = get_event_info(row["日期"])
+            evt_str = f", 活動：{evt_name}" if evt_name else ""
+            
+            line_str = (f"{d_str}: 業績${sales:,.0f} /{rate:.1f}%/ 來客{row['ADT']}筆 |"
+                        f"客單_${row['AT']} /糕點PSD_${row['糕點PSD']:,.0f}/糕點USD_{row['糕點USD']}個/"
+                        f" 報廢USD_{row['糕點報廢USD']}個/Retail商品${row['Retail']:,.0f}/"
+                        f"NCB_{row['NCB']}杯/BAF_{row['BAF']}張/節慶_{row['節慶USD']}個{evt_str}")
+            ai_prompt += f"{line_str}\n"
+            
+        if not valid_df.empty:
+            avg_line = (f"\n【區間平均】: 業績${valid_df['實績PSD'].mean():,.0f} / 來客{valid_df['ADT'].mean():,.0f} | "
+                        f"客單${avg_at:.0f} / 報廢{valid_df['糕點報廢USD'].mean():.1f}個 / NCB{valid_df['NCB'].mean():.1f}杯")
+            ai_prompt += avg_line
+            
+    else:
+        ai_prompt += "(尚無資料)"
+
+    ai_prompt += "\n\n請針對「活動效益」與「業績缺口」進行分析，告訴我活動日是否有有效拉抬來客或客單？"
+    
+    st.code(ai_prompt, language="text")
