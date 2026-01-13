@@ -348,7 +348,7 @@ with tab3:
         column_config={
             "檔期": st.column_config.TextColumn(disabled=True),
             "品項名稱": st.column_config.TextColumn(width="medium", required=True),
-            "目標控量(總量)": st.column_config.NumberColumn("🎯 目標", min_value=0),
+            "目標控量(總量)": st.column_config.NumberColumn("🎯 控量", min_value=0),
             "已訂貨(入庫)": st.column_config.NumberColumn("📦 已訂貨", min_value=0),
             "調入(+)": st.column_config.NumberColumn("調入 (+)", min_value=0),
             "調出(-)": st.column_config.NumberColumn("調出 (-)", min_value=0),
