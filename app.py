@@ -4,7 +4,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import datetime
 
-# --- 1. 設定網頁與樣式 ---
+# --- 1. 設定網頁與樣式 (必須放在最前面) ---
 st.set_page_config(page_title="星巴克礁溪門市 | 營運戰情室", page_icon="☕", layout="wide")
 
 st.markdown("""
@@ -88,7 +88,7 @@ def get_event_info(date_input):
     d_str = str(date_input)
     return MARKETING_CALENDAR.get(d_str, "")
 
-# --- 3. Google Sheet 連線與資料處理 (安全版) ---
+# --- 3. Google Sheet 連線與資料處理 (Robust Version) ---
 def get_gspread_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
@@ -114,7 +114,7 @@ def initialize_sheet(sheet):
 
 @st.cache_data(ttl=60)
 def load_kpi_data():
-    """只讀取核心業績 (Sheet1)"""
+    """讀取核心業績"""
     try:
         client = get_gspread_client()
         spreadsheet = client.open("Jiaoxi_2026_Data")
@@ -135,33 +135,33 @@ def load_kpi_data():
         df["當日活動"] = df["日期"].apply(lambda x: get_event_info(x))
         return df
     except Exception as e:
-        st.error(f"⚠️ 核心業績資料讀取失敗: {e}")
-        return pd.DataFrame() 
+        st.error(f"⚠️ 核心業績資料讀取失敗 (請檢查網路或 Sheet): {e}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def load_festival_data():
-    """讀取節慶禮盒 (Festival_Control)"""
+    """讀取節慶禮盒"""
     try:
         client = get_gspread_client()
         spreadsheet = client.open("Jiaoxi_2026_Data")
         try:
             sheet = spreadsheet.worksheet("Festival_Control")
             data = sheet.get_all_records()
-            if not data:
-                cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
-                return pd.DataFrame(columns=cols)
+            # 若無資料，回傳空表結構
+            cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+            if not data: return pd.DataFrame(columns=cols)
             
             df = pd.DataFrame(data)
             num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']
             for c in num_cols:
-                 if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+                 if c in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             return df
             
         except gspread.WorksheetNotFound:
-            return None
+            return None # 標記為未建立
             
     except Exception as e:
-        print(f"Festival data error: {e}")
+        # 回傳空表避免當機
         return pd.DataFrame()
 
 def save_data(df, target="kpi"):
@@ -172,9 +172,11 @@ def save_data(df, target="kpi"):
         if target == "kpi":
             sheet = spreadsheet.sheet1
             save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', '備註']
-            save_df = df[save_cols].copy()
+            # [重要修正] 強制填滿空值，避免 NaN 導致存檔失敗
+            save_df = df[save_cols].copy().fillna(0)
+            save_df["備註"] = save_df["備註"].astype(str).replace("0", "") # 備註不填0
             save_df["日期"] = save_df["日期"].astype(str)
-            save_df = save_df.fillna(0)
+            
             sheet.clear()
             sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
             
@@ -184,13 +186,27 @@ def save_data(df, target="kpi"):
             except gspread.WorksheetNotFound:
                 sheet = spreadsheet.add_worksheet(title="Festival_Control", rows="100", cols="20")
             
+            # [重要修正] 強制填滿空值
+            save_cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+            save_df = df[save_cols].copy()
+            
+            # 數值欄位填 0
+            num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)']
+            for c in num_cols:
+                if c in save_df.columns: save_df[c] = pd.to_numeric(save_df[c], errors='coerce').fillna(0)
+            
+            # 文字欄位填空字串
+            str_cols = ['檔期', '品項名稱', '備註']
+            for c in str_cols:
+                if c in save_df.columns: save_df[c] = save_df[c].fillna("").astype(str)
+
             sheet.clear()
-            sheet.update([df.columns.values.tolist()] + df.values.tolist())
+            sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
             
         st.toast("✅ 數據已更新！", icon="💾")
         st.cache_data.clear()
     except Exception as e:
-        st.error(f"儲存失敗: {e}")
+        st.error(f"儲存失敗 (詳細錯誤): {e}")
 
 # --- 4. 主程式 ---
 
@@ -225,7 +241,6 @@ for i in range(1, 4):
 
 st.title("☕ 2026 礁溪門市營運戰情室")
 
-# 顯示布告欄
 st.markdown(f"""
 <div class="activity-box">
     <div class="activity-title">📢 門市活動快訊 (Today: {today.strftime('%m/%d')})</div>
@@ -235,6 +250,4 @@ st.markdown(f"""
         <b>🔜 未來預告：</b> {' &nbsp;|&nbsp; '.join(upcoming_text) if upcoming_text else "近期無大型檔期"}
     </div>
 </div>
-""", unsafe_allow_html=True)
-
-# ---
+""", unsafe
