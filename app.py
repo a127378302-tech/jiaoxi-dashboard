@@ -5,7 +5,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import datetime
 
 # --- 1. 設定網頁與樣式 ---
-st.set_page_config(page_title="星巴克礁溪門市 | 營運報表", page_icon="☕", layout="wide")
+st.set_page_config(page_title="星巴克礁溪門市 | 營運戰情室", page_icon="☕", layout="wide")
 
 st.markdown("""
 <style>
@@ -32,7 +32,6 @@ HOLIDAYS_2026 = {
     "2026-06-19": "🔴 端午節", "2026-09-25": "🔴 中秋節", "2026-10-10": "🔴 國慶日",
 }
 
-# 依據 Winter PPK 建立的活動行事曆
 MARKETING_CALENDAR = {
     "2026-01-01": "🎁 買飲料券送紅包袋開始",
     "2026-01-02": "☕ 新年好友分享日(BAF)",
@@ -70,7 +69,6 @@ MARKETING_CALENDAR = {
 }
 
 def get_date_display(date_input):
-    """轉換日期顯示格式 (含星期與假日)"""
     try:
         if isinstance(date_input, str):
             date_obj = pd.to_datetime(date_input).date()
@@ -78,7 +76,6 @@ def get_date_display(date_input):
             date_obj = date_input
         date_str = str(date_obj)
         week_str = ["(一)", "(二)", "(三)", "(四)", "(五)", "(六)", "(日)"][date_obj.weekday()]
-        
         if date_str in HOLIDAYS_2026:
             return f"{date_obj.strftime('%m/%d')} {week_str} {HOLIDAYS_2026[date_str]}"
         if date_obj.weekday() >= 5:
@@ -88,21 +85,20 @@ def get_date_display(date_input):
         return str(date_input)
 
 def get_event_info(date_input):
-    """取得當日行銷活動"""
     d_str = str(date_input)
     return MARKETING_CALENDAR.get(d_str, "")
 
-# --- 3. Google Sheet 連線與資料處理 ---
-def get_google_sheet_data():
+# --- 3. Google Sheet 連線與資料處理 (安全版) ---
+def get_gspread_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
         creds_dict = dict(st.secrets["gcp_service_account"]) if "gcp_service_account" in st.secrets else dict(st.secrets)
         if "private_key" in creds_dict: creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
-        return client.open("Jiaoxi_2026_Data").sheet1
+        return client
     except Exception as e:
-        st.error(f"❌ 連線錯誤：{str(e)}")
+        st.error(f"❌ 連線認證錯誤：{str(e)}")
         st.stop()
 
 def initialize_sheet(sheet):
@@ -116,15 +112,22 @@ def initialize_sheet(sheet):
     sheet.update([df.columns.values.tolist()] + df.values.tolist())
     return df
 
+# --- 關鍵修改：拆分讀取函式，避免一個失敗全部卡死 ---
+
 @st.cache_data(ttl=60)
-def load_data():
+def load_kpi_data():
+    """只讀取核心業績 (Sheet1)，確保這部分絕對穩定"""
     try:
-        sheet = get_google_sheet_data()
+        client = get_gspread_client()
+        spreadsheet = client.open("Jiaoxi_2026_Data")
+        # 使用 .sheet1 屬性，這樣無論它是叫 "工作表1" 還是 "Sheet1" 都能抓到第一張表
+        sheet = spreadsheet.sheet1 
         data = sheet.get_all_records()
+        
         if not data: return initialize_sheet(sheet)
         
         df = pd.DataFrame(data)
-        # 欄位檢查與格式轉換
+        # 欄位檢查
         required = ['日期', '目標PSD', '實績PSD']
         if not all(c in df.columns for c in required): return initialize_sheet(sheet)
         
@@ -132,24 +135,66 @@ def load_data():
         numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
         for col in numeric_cols:
             if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            
-        # 自動填入活動欄位 (不存入 Sheet，僅顯示用)
+        
         df["當日活動"] = df["日期"].apply(lambda x: get_event_info(x))
         return df
     except Exception as e:
-        st.error(f"讀取錯誤: {e}")
+        st.error(f"⚠️ 核心業績資料讀取失敗: {e}")
+        return pd.DataFrame() # 回傳空表避免當機
+
+@st.cache_data(ttl=60)
+def load_festival_data():
+    """讀取節慶禮盒 (Festival_Control)，若失敗則回傳空表，不影響主程式"""
+    try:
+        client = get_gspread_client()
+        spreadsheet = client.open("Jiaoxi_2026_Data")
+        try:
+            sheet = spreadsheet.worksheet("Festival_Control")
+            data = sheet.get_all_records()
+            if not data:
+                # 若表存在但沒資料，回傳空結構
+                cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+                return pd.DataFrame(columns=cols)
+            
+            df = pd.DataFrame(data)
+            num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']
+            for c in num_cols:
+                 if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            return df
+            
+        except gspread.WorksheetNotFound:
+            # 這是重點：如果找不到分頁，回傳 None 讓主程式知道
+            return None
+            
+    except Exception as e:
+        # 其他錯誤，回傳空 DataFrame
+        print(f"Festival data error: {e}")
         return pd.DataFrame()
 
-def save_data_to_sheet(df):
+def save_data(df, target="kpi"):
     try:
-        sheet = get_google_sheet_data()
-        # 存檔時不包含「當日活動」與「顯示日期」，只存原始數據
-        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', '備註']
-        save_df = df[save_cols].copy()
-        save_df["日期"] = save_df["日期"].astype(str)
-        save_df = save_df.fillna(0)
-        sheet.clear()
-        sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
+        client = get_gspread_client()
+        spreadsheet = client.open("Jiaoxi_2026_Data")
+        
+        if target == "kpi":
+            sheet = spreadsheet.sheet1
+            save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', '備註']
+            save_df = df[save_cols].copy()
+            save_df["日期"] = save_df["日期"].astype(str)
+            save_df = save_df.fillna(0)
+            sheet.clear()
+            sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
+            
+        elif target == "festival":
+            # 如果存檔時發現沒有分頁，則建立它
+            try:
+                sheet = spreadsheet.worksheet("Festival_Control")
+            except gspread.WorksheetNotFound:
+                sheet = spreadsheet.add_worksheet(title="Festival_Control", rows="100", cols="20")
+            
+            sheet.clear()
+            sheet.update([df.columns.values.tolist()] + df.values.tolist())
+            
         st.toast("✅ 數據已更新！", icon="💾")
         st.cache_data.clear()
     except Exception as e:
@@ -171,8 +216,7 @@ with st.sidebar:
     * ☕ **好友分享/BAF**
     """)
 
-# --- [新增功能] 頂部活動大布告欄 (強制設定為台灣時區) ---
-# 雲端 Server 通常是 UTC，台灣是 UTC+8
+# --- 頂部活動大布告欄 (強制設定為台灣時區) ---
 tw_tz = datetime.timezone(datetime.timedelta(hours=8))
 today = datetime.datetime.now(tw_tz).date()
 
@@ -188,7 +232,7 @@ for i in range(1, 4):
         d_str = future_date.strftime('%m/%d')
         upcoming_text.append(f"<b>{d_str}</b>: {evt}")
 
-st.title("☕ 2026 礁溪門市營運報表")
+st.title("☕ 2026 礁溪門市營運戰情室")
 
 # 顯示布告欄
 st.markdown(f"""
@@ -202,12 +246,18 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# 載入資料
-if "df" not in st.session_state: st.session_state.df = load_data()
-df = st.session_state.df
-if df.empty: st.stop()
+# --- 載入資料 (雙軌讀取) ---
+if "df" not in st.session_state: st.session_state.df = load_kpi_data()
+if "df_fest" not in st.session_state: st.session_state.df_fest = load_festival_data()
 
-# 月份篩選 (預設選取當前台灣時間的月份)
+df = st.session_state.df
+df_fest = st.session_state.df_fest
+
+if df.empty:
+    st.error("❌ 嚴重錯誤：無法讀取主業績資料，請檢查 Google Sheet 權限或網路連線。")
+    st.stop()
+
+# 月份篩選
 current_month = today.month
 selected_month = st.selectbox("月份", range(1, 13), index=current_month-1)
 df["Month"] = pd.to_datetime(df["日期"]).dt.month
@@ -215,13 +265,13 @@ current_month_df = df[df["Month"] == selected_month].copy()
 if not current_month_df.empty:
     current_month_df["顯示日期"] = current_month_df["日期"].apply(get_date_display)
 
-# --- 數據輸入區 (加入「當日活動」欄位) ---
-st.subheader(f"📝 {selected_month} 月數據輸入")
+# --- 數據輸入區 ---
+st.subheader(f"📝 {selected_month} 月數據與管理")
 
-tab1, tab2 = st.tabs(["📊 核心業績 (PSD/ADT/AT)", "🥐 商品與庫存 (Product/Waste)"])
+tab1, tab2, tab3 = st.tabs(["📊 核心業績", "🥐 商品與庫存", "🎁 節慶禮盒控管"])
 
 with tab1:
-    st.caption("請輸入每日業績。右側「當日活動」為系統自動帶入，供您參考。")
+    st.caption("輸入說明：右側「當日活動」為系統自動帶入。")
     edited_kpi = st.data_editor(
         current_month_df[['顯示日期', '日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '備註', '當日活動']],
         column_config={
@@ -232,7 +282,7 @@ with tab1:
             "PSD達成率": st.column_config.NumberColumn("達成%", disabled=True, format="%.1f%%"),
             "ADT": st.column_config.NumberColumn("來客", format="%d"),
             "AT": st.column_config.NumberColumn("客單", disabled=True, format="$%d"),
-            "備註": st.column_config.TextColumn("手動備註", width="small"),
+            "備註": st.column_config.TextColumn("備註", width="small"),
             "當日活動": st.column_config.TextColumn("📅 當日活動 (自動)", disabled=True, width="medium"), 
         },
         use_container_width=True, hide_index=True, num_rows="fixed", key="editor_kpi"
@@ -255,8 +305,65 @@ with tab2:
         use_container_width=True, hide_index=True, num_rows="fixed", key="editor_prod"
     )
 
-if st.button("💾 確認更新 (並自動計算)", type="primary"):
-    # 更新資料邏輯
+with tab3:
+    st.markdown("#### 🎁 節慶禮盒訂貨/調撥管理")
+    
+    # 判斷是否成功讀取到禮盒表
+    if df_fest is None:
+        st.warning("⚠️ 尚未偵測到 'Festival_Control' 分頁。")
+        st.info("💡 系統已自動切換至「初始化模式」。請直接在下方新增資料，按下【儲存】後，系統會自動在 Google Sheet 幫您建立該分頁。")
+        
+        # 建立初始化空表
+        cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+        # 預設一行範例
+        display_fest_df = pd.DataFrame([["2026春節", "範例禮盒", 100, 0, 0, 0, 0, ""]], columns=cols)
+        all_seasons = ["2026春節"]
+    else:
+        # 正常讀取模式
+        if df_fest.empty:
+            cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+            df_fest = pd.DataFrame(columns=cols)
+            all_seasons = ["2026春節"]
+        else:
+            all_seasons = df_fest['檔期'].unique() if '檔期' in df_fest.columns else ["2026春節"]
+        
+        selected_season = st.selectbox("選擇檔期", all_seasons, key="season_select")
+        
+        # 篩選資料
+        if '檔期' in df_fest.columns:
+            display_fest_df = df_fest[df_fest['檔期'] == selected_season].copy()
+        else:
+            display_fest_df = df_fest.copy()
+            
+    # 計算欄位
+    if not display_fest_df.empty:
+        for col in ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']:
+            if col not in display_fest_df.columns: display_fest_df[col] = 0
+            
+        display_fest_df['剩餘可訂量'] = display_fest_df['目標控量(總量)'] - display_fest_df['已訂貨(入庫)']
+        display_fest_df['訂貨進度'] = display_fest_df.apply(lambda x: x['已訂貨(入庫)'] / x['目標控量(總量)'] if x['目標控量(總量)'] > 0 else 0, axis=1)
+
+    edited_fest = st.data_editor(
+        display_fest_df,
+        column_config={
+            "檔期": st.column_config.TextColumn(disabled=True),
+            "品項名稱": st.column_config.TextColumn(width="medium", required=True),
+            "目標控量(總量)": st.column_config.NumberColumn("🎯 目標", min_value=0),
+            "已訂貨(入庫)": st.column_config.NumberColumn("📦 已訂貨", min_value=0),
+            "調入(+)": st.column_config.NumberColumn("調入 (+)", min_value=0),
+            "調出(-)": st.column_config.NumberColumn("調出 (-)", min_value=0),
+            "剩餘可訂量": st.column_config.NumberColumn("🚀 剩餘", disabled=True),
+            "訂貨進度": st.column_config.ProgressColumn("進度", format="%.0f%%", min_value=0, max_value=1),
+            "目前庫存(估)": st.column_config.NumberColumn("庫存", disabled=True),
+            "備註": st.column_config.TextColumn(width="medium")
+        },
+        use_container_width=True, num_rows="dynamic", key="editor_fest"
+    )
+
+# --- 儲存按鈕 ---
+col_save_1, col_save_2 = st.columns([1, 4])
+if col_save_1.button("💾 更新業績 (Tab 1&2)", type="primary"):
+    # 更新業績邏輯
     for i, row in edited_kpi.iterrows():
         row_date = row["日期"]
         mask = df["日期"] == row_date
@@ -279,8 +386,16 @@ if st.button("💾 確認更新 (並自動計算)", type="primary"):
         cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
         for c in cols: df.loc[mask, c] = row[c]
 
-    save_data_to_sheet(df)
+    save_data(df, "kpi")
     st.session_state.df = df
+    st.rerun()
+
+if col_save_2.button("🎁 更新禮盒 (Tab 3)"):
+    # 更新禮盒邏輯
+    save_cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+    final_save_df = edited_fest[save_cols].copy()
+    st.session_state.df_fest = final_save_df
+    save_data(final_save_df, "festival")
     st.rerun()
 
 # --- 儀表板與分析區 ---
@@ -296,7 +411,6 @@ with col_view:
 
 target_df = current_month_df
 if view_mode == "單週分析":
-    # 加回日期區間顯示
     weeks = sorted(current_month_df["Week_Num"].unique())
     week_options = {}
     for w in weeks:
@@ -342,7 +456,7 @@ if not valid_df.empty:
     k4.metric("NCB 杯數", f"{valid_df['NCB'].mean():.1f}")
     k5.metric("Retail", f"${valid_df['Retail'].mean():,.0f}")
 
-# --- [AI 分析指令產生器 - 更新版] ---
+# --- AI 分析指令產生器 ---
 st.markdown("---")
 st.subheader("🤖 呼叫 AI 營運顧問")
 
@@ -365,7 +479,6 @@ with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)"
             target = row['目標PSD']
             rate = (sales / target * 100) if target > 0 else 0
             
-            # 取得活動名稱
             evt_name = get_event_info(row["日期"])
             evt_str = f", 活動：{evt_name}" if evt_name else ""
             
@@ -375,7 +488,6 @@ with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)"
                         f"NCB_{row['NCB']}杯/BAF_{row['BAF']}張/節慶_{row['節慶USD']}個{evt_str}")
             ai_prompt += f"{line_str}\n"
             
-        # 加入平均值
         if not valid_df.empty:
             avg_line = (f"\n【區間平均】: 業績${valid_df['實績PSD'].mean():,.0f} / 來客{valid_df['ADT'].mean():,.0f} | "
                         f"客單${avg_at:.0f} / 報廢{valid_df['糕點報廢USD'].mean():.1f}個 / NCB{valid_df['NCB'].mean():.1f}杯")
