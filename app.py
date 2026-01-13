@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import datetime
+import time
 
 # --- 1. 設定網頁與樣式 ---
 st.set_page_config(page_title="星巴克礁溪門市 | 營運戰情室", page_icon="☕", layout="wide")
@@ -88,7 +89,7 @@ def get_event_info(date_input):
     d_str = str(date_input)
     return MARKETING_CALENDAR.get(d_str, "")
 
-# --- 3. Google Sheet 連線與資料處理 ---
+# --- 3. Google Sheet 連線與資料處理 (同步邏輯修正版) ---
 def get_gspread_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
@@ -112,13 +113,12 @@ def initialize_sheet(sheet):
     sheet.update([df.columns.values.tolist()] + df.values.tolist())
     return df
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=5) # 縮短快取時間，確保更新後立刻看到變更
 def load_kpi_data():
     """讀取核心業績"""
     try:
         client = get_gspread_client()
         spreadsheet = client.open("Jiaoxi_2026_Data")
-        # 抓第一張表 (Sheet1)
         sheet = spreadsheet.sheet1 
         data = sheet.get_all_records()
         
@@ -136,10 +136,9 @@ def load_kpi_data():
         df["當日活動"] = df["日期"].apply(lambda x: get_event_info(x))
         return df
     except Exception as e:
-        # 回傳空表避免當機
         return pd.DataFrame()
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=5)
 def load_festival_data():
     """讀取節慶禮盒"""
     try:
@@ -154,14 +153,13 @@ def load_festival_data():
                 return pd.DataFrame(columns=cols)
             
             df = pd.DataFrame(data)
-            # 確保欄位都是數值
             num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)']
             for c in num_cols:
                  if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
             return df
             
         except gspread.WorksheetNotFound:
-            return None # 讓主程式知道需要初始化
+            return None 
             
     except Exception as e:
         return pd.DataFrame()
@@ -190,20 +188,23 @@ def save_data(df, target="kpi"):
             save_cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
             save_df = df[save_cols].copy()
             
-            # 清理資料：數值填0，文字填空
+            # 強制數值轉換，避免空字串導致錯誤
             num_cols = ['目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)']
             for c in num_cols:
-                if c in save_df.columns: save_df[c] = pd.to_numeric(save_df[c], errors='coerce').fillna(0)
+                if c in save_df.columns: 
+                    save_df[c] = pd.to_numeric(save_df[c], errors='coerce').fillna(0)
             
             str_cols = ['檔期', '品項名稱', '備註']
             for c in str_cols:
-                if c in save_df.columns: save_df[c] = save_df[c].fillna("").astype(str)
+                if c in save_df.columns: 
+                    save_df[c] = save_df[c].fillna("").astype(str)
 
             sheet.clear()
             sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
             
-        st.toast("✅ 數據已更新！", icon="💾")
-        st.cache_data.clear()
+        st.toast("✅ 雲端同步完成！", icon="☁️")
+        st.cache_data.clear() # 清除快取，強制下次讀取最新資料
+        
     except Exception as e:
         st.error(f"儲存失敗: {e}")
 
@@ -238,9 +239,6 @@ for i in range(1, 4):
         d_str = future_date.strftime('%m/%d')
         upcoming_text.append(f"<b>{d_str}</b>: {evt}")
 
-st.title("☕ 2026 礁溪門市營運戰情室")
-
-# [修復重點]：將 HTML 字串獨立出來，避免 SyntaxError
 upcoming_html = ' &nbsp;|&nbsp; '.join(upcoming_text) if upcoming_text else "近期無大型檔期"
 html_content = f"""
 <div class="activity-box">
@@ -327,6 +325,7 @@ with tab3:
     col_sel, col_add = st.columns([2, 1])
     
     with col_sel:
+        # 記憶選擇
         idx = 0
         if "target_season" in st.session_state and st.session_state.target_season in existing_seasons:
             idx = existing_seasons.index(st.session_state.target_season)
@@ -345,7 +344,7 @@ with tab3:
     elif selected_season_opt != "(請新增檔期)":
         current_active_season = selected_season_opt
 
-    # 4. 資料過濾與顯示
+    # 4. 資料過濾
     if current_active_season and df_fest is not None and not df_fest.empty and '檔期' in df_fest.columns:
         display_fest_df = df_fest[df_fest['檔期'] == current_active_season].copy()
     else:
@@ -416,27 +415,32 @@ if col_save_1.button("💾 更新業績 (Tab 1&2)", type="primary"):
     st.session_state.df = df
     st.rerun()
 
-# Button 2: 更新禮盒 (修復：資料消失問題)
+# Button 2: 更新禮盒 (最穩版本)
 if col_save_2.button("🎁 更新禮盒 (Tab 3)"):
     if current_active_season:
-        # 1. 標記檔期
-        edited_fest['檔期'] = current_active_season
+        # 1. 抓取當前編輯器中的資料
+        new_data = edited_fest.copy()
+        new_data['檔期'] = current_active_season # 強制賦予檔期名稱
         
-        # 2. 合併資料
+        # 2. 抓取原始完整資料
         original_fest = st.session_state.df_fest
+        
+        # 3. 執行合併 (如果原始資料存在，就移除當前檔期的舊資料，換上新的)
         if original_fest is not None and not original_fest.empty and '檔期' in original_fest.columns:
             other_data = original_fest[original_fest['檔期'] != current_active_season]
-            final_save_df = pd.concat([other_data, edited_fest], ignore_index=True)
+            final_save_df = pd.concat([other_data, new_data], ignore_index=True)
         else:
-            final_save_df = edited_fest
+            final_save_df = new_data
             
-        # 3. 欄位補齊與存檔
+        # 4. 欄位清潔 (防止 NaN 造成同步失敗)
         save_cols = ['檔期', '品項名稱', '目標控量(總量)', '已訂貨(入庫)', '調入(+)', '調出(-)', '目前庫存(估)', '備註']
+        # 確保所有欄位都存在
         for c in save_cols:
             if c not in final_save_df.columns: final_save_df[c] = ""
-            
+        
         final_save_df = final_save_df[save_cols]
         
+        # 5. 更新狀態並存檔
         st.session_state.target_season = current_active_season
         st.session_state.df_fest = final_save_df
         
