@@ -450,7 +450,7 @@ elif page == "🎁 節慶禮盒控管":
     edited_gift_df = st.data_editor(
         gift_df,
         column_config={
-            "檔期": st.column_config.SelectboxColumn("檔期", options=["Spring", "Summer", "Moon", "Xmas", "NewYear", "常態"], required=True),
+            "檔期": st.column_config.SelectboxColumn("檔期", options=["母親節", "端午節", "父親節", "中秋節", "CNY", "其他"], required=True),
             "品項": st.column_config.TextColumn("禮盒名稱", required=True, width="medium"),
             "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
             "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
