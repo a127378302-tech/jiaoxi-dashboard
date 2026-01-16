@@ -5,7 +5,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import datetime
 
 # --- 1. 設定網頁與樣式 ---
-st.set_page_config(page_title="星巴克礁溪門市 | 營運與禮盒控管", page_icon="☕", layout="wide")
+st.set_page_config(page_title="星巴克礁溪門市 | 整合管理系統", page_icon="☕", layout="wide")
 
 st.markdown("""
 <style>
@@ -22,6 +22,7 @@ st.markdown("""
     .activity-title { font-weight: bold; color: #00704A; font-size: 1.1em; }
     .stock-bar-bg { width: 100%; background-color: #e0e0e0; border-radius: 5px; height: 20px; }
     .stock-bar-fill { height: 100%; border-radius: 5px; text-align: center; color: white; font-size: 12px; line-height: 20px;}
+    .alert-text { color: #d9534f; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -67,7 +68,7 @@ MARKETING_CALENDAR = {
 }
 
 def get_date_display(date_input):
-    """轉換日期顯示格式 (含星期與假日)"""
+    """轉換日期顯示格式"""
     try:
         if isinstance(date_input, str):
             date_obj = pd.to_datetime(date_input).date()
@@ -85,13 +86,11 @@ def get_date_display(date_input):
         return str(date_input)
 
 def get_event_info(date_input):
-    """取得當日行銷活動"""
     d_str = str(date_input)
     return MARKETING_CALENDAR.get(d_str, "")
 
 # --- 3. Google Sheet 連線核心 ---
 def get_gspread_client():
-    """取得 Google Sheets Client 物件"""
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
         creds_dict = dict(st.secrets["gcp_service_account"]) if "gcp_service_account" in st.secrets else dict(st.secrets)
@@ -103,14 +102,13 @@ def get_gspread_client():
         st.error(f"❌ GCP 連線錯誤：{str(e)}")
         st.stop()
 
-# --- 3.1 營運報表資料處理 (Sheet 1) ---
+# --- 3.1 營運報表 (Sheet 1) ---
 def get_main_sheet():
     client = get_gspread_client()
     return client.open("Jiaoxi_2026_Data").sheet1
 
 def initialize_sheet(sheet):
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
-    # [更新] 加入外送欄位
     cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '備註']
     df = pd.DataFrame(columns=cols)
     df['日期'] = date_range.astype(str)
@@ -128,17 +126,14 @@ def load_data():
         if not data: return initialize_sheet(sheet)
         
         df = pd.DataFrame(data)
-        required = ['日期', '目標PSD', '實績PSD']
-        if not all(c in df.columns for c in required): return initialize_sheet(sheet)
+        # 簡易檢查
+        if '日期' not in df.columns: return initialize_sheet(sheet)
         
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
-        # [更新] 加入外送欄位到數值處理清單
         numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP']
         for col in numeric_cols:
-            if col in df.columns: 
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            else:
-                df[col] = 0 # 若試算表還沒新增該欄位，預設為 0 避免錯誤
+            if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            else: df[col] = 0
             
         df["當日活動"] = df["日期"].apply(lambda x: get_event_info(x))
         return df
@@ -149,13 +144,9 @@ def load_data():
 def save_data_to_sheet(df):
     try:
         sheet = get_main_sheet()
-        # [更新] 存檔時包含外送欄位
         save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '備註']
-        
-        # 確保所有欄位都存在 (避免 user 手動刪除導致錯誤)
         for col in save_cols:
-            if col not in df.columns:
-                df[col] = 0 if col != '備註' else ""
+            if col not in df.columns: df[col] = 0 if col != '備註' else ""
 
         save_df = df[save_cols].copy()
         save_df["日期"] = save_df["日期"].astype(str)
@@ -167,17 +158,14 @@ def save_data_to_sheet(df):
     except Exception as e:
         st.error(f"儲存失敗: {e}")
 
-# --- 3.2 禮盒控管資料處理 (Sheet 2) ---
+# --- 3.2 禮盒控管 (Sheet 2) ---
 def get_gift_sheet():
     client = get_gspread_client()
     workbook = client.open("Jiaoxi_2026_Data")
-    try:
-        return workbook.worksheet("工作表2")
+    try: return workbook.worksheet("工作表2")
     except:
-        try:
-            return workbook.get_worksheet(1)
-        except:
-            return workbook.add_worksheet(title="工作表2", rows=100, cols=4)
+        try: return workbook.get_worksheet(1)
+        except: return workbook.add_worksheet(title="工作表2", rows=100, cols=4)
 
 @st.cache_data(ttl=60)
 def load_gift_data():
@@ -185,20 +173,15 @@ def load_gift_data():
         sheet = get_gift_sheet()
         data = sheet.get_all_records()
         cols = ['檔期', '品項', '原始控量', '剩餘控量']
-        
-        if not data:
-            df = pd.DataFrame(columns=cols)
+        if not data: df = pd.DataFrame(columns=cols)
         else:
             df = pd.DataFrame(data)
             for c in cols:
-                if c not in df.columns:
-                    df[c] = ""
-                    
+                if c not in df.columns: df[c] = ""
         df['原始控量'] = pd.to_numeric(df['原始控量'], errors='coerce').fillna(0).astype(int)
         df['剩餘控量'] = pd.to_numeric(df['剩餘控量'], errors='coerce').fillna(0).astype(int)
         return df[cols]
     except Exception as e:
-        st.error(f"禮盒資料讀取錯誤: {e}")
         return pd.DataFrame(columns=['檔期', '品項', '原始控量', '剩餘控量'])
 
 def save_gift_data(df):
@@ -212,13 +195,50 @@ def save_gift_data(df):
     except Exception as e:
         st.error(f"禮盒儲存失敗: {e}")
 
+# --- 3.3 夥伴休假管理 (Sheet 3) ---
+def get_leave_sheet():
+    client = get_gspread_client()
+    workbook = client.open("Jiaoxi_2026_Data")
+    try: return workbook.worksheet("工作表3")
+    except:
+        try: return workbook.get_worksheet(2)
+        except: return workbook.add_worksheet(title="工作表3", rows=100, cols=4)
+
+@st.cache_data(ttl=60)
+def load_leave_data():
+    try:
+        sheet = get_leave_sheet()
+        data = sheet.get_all_records()
+        cols = ['夥伴姓名', '假別週期', '假別', '剩餘時數']
+        if not data: df = pd.DataFrame(columns=cols)
+        else:
+            df = pd.DataFrame(data)
+            for c in cols:
+                if c not in df.columns: df[c] = ""
+        # 轉換數值
+        df['剩餘時數'] = pd.to_numeric(df['剩餘時數'], errors='coerce').fillna(0)
+        return df[cols]
+    except Exception as e:
+        return pd.DataFrame(columns=['夥伴姓名', '假別週期', '假別', '剩餘時數'])
+
+def save_leave_data(df):
+    try:
+        sheet = get_leave_sheet()
+        df = df.fillna("")
+        sheet.clear()
+        sheet.update([df.columns.values.tolist()] + df.values.tolist())
+        st.toast("✅ 休假資料已更新！", icon="👥")
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"休假儲存失敗: {e}")
+
 # --- 4. 主程式 ---
 
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/zh/d/df/Starbucks_Corporation_Logo_2011.svg", width=100)
     st.title("門市管理系統")
     
-    page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管"], index=0)
+    page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理"], index=0)
     
     st.markdown("---")
     if st.button("🔄 重新讀取資料"):
@@ -239,8 +259,7 @@ if page == "📊 每日營運報表":
         future_date = today + datetime.timedelta(days=i)
         evt = get_event_info(future_date)
         if evt:
-            d_str = future_date.strftime('%m/%d')
-            upcoming_text.append(f"<b>{d_str}</b>: {evt}")
+            upcoming_text.append(f"<b>{future_date.strftime('%m/%d')}</b>: {evt}")
 
     st.title("☕ 2026 礁溪門市營運報表")
 
@@ -266,10 +285,8 @@ if page == "📊 每日營運報表":
     if not current_month_df.empty:
         current_month_df["顯示日期"] = current_month_df["日期"].apply(get_date_display)
 
-    # 數據輸入區
     st.subheader(f"📝 {selected_month} 月數據輸入")
 
-    # [更新] 新增第三個分頁
     tab1, tab2, tab3 = st.tabs(["📊 核心業績 (PSD/ADT/AT)", "🥐 商品與庫存 (Product/Waste)", "🛵 外送平台 (Delivery)"])
 
     with tab1:
@@ -307,9 +324,7 @@ if page == "📊 每日營運報表":
             use_container_width=True, hide_index=True, num_rows="fixed", key="editor_prod"
         )
     
-    # [更新] 新增外送分頁內容
     with tab3:
-        st.caption("請輸入各平台外送業績 (單位：元)")
         edited_delivery = st.data_editor(
             current_month_df[['顯示日期', '日期', 'foodpanda', 'foodomo', 'MOP']],
             column_config={
@@ -323,7 +338,6 @@ if page == "📊 每日營運報表":
         )
 
     if st.button("💾 確認更新 (並自動計算)", type="primary"):
-        # 更新 KPI
         for i, row in edited_kpi.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -332,22 +346,18 @@ if page == "📊 每日營運報表":
                 df.loc[mask, "實績PSD"] = row["實績PSD"]
                 df.loc[mask, "ADT"] = row["ADT"]
                 df.loc[mask, "備註"] = row["備註"]
-                
                 t_psd = float(row["目標PSD"]) if row["目標PSD"] > 0 else 1.0
                 actual_psd = float(row["實績PSD"])
                 df.loc[mask, "PSD達成率"] = round((actual_psd / t_psd) * 100, 1)
-                
                 cust = float(row["ADT"]) if row["ADT"] > 0 else 1.0
                 df.loc[mask, "AT"] = int(round(actual_psd / cust, 0)) if row["ADT"] > 0 else 0
 
-        # 更新 商品
         for i, row in edited_prod.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
             for c in cols: df.loc[mask, c] = row[c]
             
-        # [更新] 更新 外送
         for i, row in edited_delivery.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -358,15 +368,13 @@ if page == "📊 每日營運報表":
         st.session_state.df = df
         st.rerun()
 
-    # 儀表板與分析區
+    # 儀表板
     st.markdown("---")
     current_month_df["Week_Num"] = pd.to_datetime(current_month_df["日期"]).dt.isocalendar().week
     st.subheader("📅 數據檢視與 AI 分析")
     col_view, col_week = st.columns([1, 3])
-
     with col_view:
         view_mode = st.radio("選擇模式", ["全月累計", "單週分析"], horizontal=True, label_visibility="collapsed")
-
     target_df = current_month_df
     if view_mode == "單週分析":
         weeks = sorted(current_month_df["Week_Num"].unique())
@@ -374,20 +382,14 @@ if page == "📊 每日營運報表":
         for w in weeks:
             week_data = current_month_df[current_month_df["Week_Num"] == w]
             if not week_data.empty:
-                start_date = week_data["日期"].min().strftime("%m/%d")
-                end_date = week_data["日期"].max().strftime("%m/%d")
-                week_label = f"Week {w} | {start_date} ~ {end_date}"
-                week_options[week_label] = w
-            
+                week_options[f"Week {w}"] = w
         with col_week:
             if week_options:
                 sel_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
                 target_df = current_month_df[current_month_df["Week_Num"] == week_options[sel_label]]
 
-    # 計算邏輯
     valid_df = target_df[target_df["實績PSD"] > 0]
     days_count = max(valid_df.shape[0], 1)
-
     total_sales = target_df["實績PSD"].sum()
     total_target = target_df["目標PSD"].sum()
     achieve_rate = (total_sales / total_target * 100) if total_target > 0 else 0
@@ -416,38 +418,15 @@ if page == "📊 每日營運報表":
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        # [更新] AI Prompt 增加外送資訊
-        ai_prompt = f"""我是星巴克店經理，請協助分析本門市數據。\n【分析區間】：{period_str}\n\n【每日詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶/熊貓/FDM/MOP, 活動：名稱)\n"""
-        
+        ai_prompt = f"""我是星巴克店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n"""
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
-        
         if not detail_data.empty:
             for idx, row in detail_data.iterrows():
-                d_str = row["日期"].strftime("%m/%d")
-                sales = row['實績PSD']
-                target = row['目標PSD']
-                rate = (sales / target * 100) if target > 0 else 0
-                evt_name = get_event_info(row["日期"])
-                evt_str = f", 活動：{evt_name}" if evt_name else ""
-                
-                # 確保外送欄位有值
                 panda = row.get('foodpanda', 0)
-                fdm = row.get('foodomo', 0)
-                mop = row.get('MOP', 0)
-
-                line_str = (f"{d_str}: 業績${sales:,.0f} /{rate:.1f}%/ 來客{row['ADT']}筆 |"
-                            f"客單_${row['AT']} /糕點PSD_${row['糕點PSD']:,.0f}/糕點USD_{row['糕點USD']}個/"
-                            f" 報廢USD_{row['糕點報廢USD']}個/Retail商品${row['Retail']:,.0f}/"
-                            f"NCB_{row['NCB']}杯/BAF_{row['BAF']}張/節慶_{row['節慶USD']}個/"
-                            f"熊貓${panda}/FDM${fdm}/MOP${mop}{evt_str}")
+                line_str = (f"{row['日期']}: 業績${row['實績PSD']:,.0f} /{row['ADT']}筆 | 客單${row['AT']} /熊貓${panda}")
                 ai_prompt += f"{line_str}\n"
-            if not valid_df.empty:
-                avg_line = (f"\n【區間平均】: 業績${valid_df['實績PSD'].mean():,.0f} / 來客{valid_df['ADT'].mean():,.0f} | "
-                            f"客單${avg_at:.0f} / 報廢{valid_df['糕點報廢USD'].mean():.1f}個 / NCB{valid_df['NCB'].mean():.1f}杯")
-                ai_prompt += avg_line
-        else:
-            ai_prompt += "(尚無資料)"
-        ai_prompt += "\n\n請針對「活動效益」與「業績缺口」進行分析，並觀察外送平台業績(熊貓/Foodomo/MOP)是否有機會點？"
+        else: ai_prompt += "(尚無資料)"
+        ai_prompt += "\n\n請分析活動效益與外送機會點。"
         st.code(ai_prompt, language="text")
 
 # ==========================================
@@ -466,17 +445,17 @@ elif page == "🎁 節慶禮盒控管":
         sell_rate = (sold_qty / total_qty * 100) if total_qty > 0 else 0
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("總控量 (Total)", f"{total_qty} 盒")
-        c2.metric("已銷售 (Sold)", f"{sold_qty} 盒")
-        c3.metric("庫存剩餘 (Stock)", f"{remain_qty} 盒")
+        c1.metric("總控量", f"{total_qty} 盒")
+        c2.metric("已銷售", f"{sold_qty} 盒")
+        c3.metric("庫存剩餘", f"{remain_qty} 盒")
         c4.metric("銷售進度", f"{sell_rate:.1f}%")
-        
         st.markdown("---")
 
     edited_gift_df = st.data_editor(
         gift_df,
         column_config={
-            "檔期": st.column_config.SelectboxColumn("檔期", options=["Spring", "Summer", "Moon", "Xmas", "NewYear", "常態"], required=True),
+            # [更新] 依據您的需求更新檔期選項
+            "檔期": st.column_config.SelectboxColumn("檔期", options=["母親節", "端午節", "父親節", "中秋節", "CNY", "其他"], required=True),
             "品項": st.column_config.TextColumn("禮盒名稱", required=True, width="medium"),
             "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
             "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
@@ -486,31 +465,72 @@ elif page == "🎁 節慶禮盒控管":
         key="gift_editor"
     )
     
-    col_btn, col_info = st.columns([1, 4])
-    with col_btn:
-        if st.button("💾 儲存禮盒變更", type="primary"):
-            save_gift_data(edited_gift_df)
-            st.rerun()
+    if st.button("💾 儲存禮盒變更", type="primary"):
+        save_gift_data(edited_gift_df)
+        st.rerun()
             
     st.markdown("### 📊 庫存視覺化")
     if not edited_gift_df.empty:
         for index, row in edited_gift_df.iterrows():
-            name = row['品項']
-            original = row['原始控量']
-            remain = row['剩餘控量']
-            
-            if original > 0:
-                pct = int((remain / original) * 100)
+            if row['原始控量'] > 0:
+                pct = int((row['剩餘控量'] / row['原始控量']) * 100)
                 color = "#28a745"
                 if pct < 20: color = "#dc3545"
                 elif pct < 50: color = "#ffc107"
-                
-                st.markdown(f"**{name}** (剩 {remain}/{original})")
-                st.markdown(f"""
-                <div class="stock-bar-bg">
-                    <div class="stock-bar-fill" style="width: {pct}%; background-color: {color};">
-                        {pct}%
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                st.write("")
+                st.markdown(f"**{row['品項']}** (剩 {row['剩餘控量']}/{row['原始控量']})")
+                st.markdown(f"""<div class="stock-bar-bg"><div class="stock-bar-fill" style="width: {pct}%; background-color: {color};">{pct}%</div></div>""", unsafe_allow_html=True)
+
+# ==========================================
+# 頁面 3: 夥伴休假管理 (新增)
+# ==========================================
+elif page == "👥 夥伴休假管理":
+    st.title("👥 夥伴休假管理 (Sheet 3)")
+    st.info("此區資料每年會結轉成加班費，請務必密切追蹤「特別假」與「代休假」的剩餘時數。")
+    
+    leave_df = load_leave_data()
+    
+    # 統計看板
+    if not leave_df.empty:
+        # 計算總未休時數 (針對特別假與代休假)
+        critical_leaves = leave_df[leave_df['假別'].isin(['特別假', '代休假'])]
+        total_outstanding = critical_leaves['剩餘時數'].sum()
+        
+        col_sum1, col_sum2 = st.columns(2)
+        col_sum1.metric("⚠️ 潛在加班費風險 (時數總計)", f"{total_outstanding:.1f} hr")
+        col_sum2.metric("追蹤中名單數", f"{len(leave_df)} 筆")
+        st.markdown("---")
+
+    # 編輯區
+    edited_leave_df = st.data_editor(
+        leave_df,
+        column_config={
+            "夥伴姓名": st.column_config.TextColumn("夥伴姓名", required=True),
+            "假別週期": st.column_config.TextColumn("假別週期 (例: 20250706~20260705)", required=True, width="medium"),
+            "假別": st.column_config.SelectboxColumn(
+                "假別類型",
+                options=["特別假", "代休假", "喪假", "婚假", "其他"],
+                required=True
+            ),
+            "剩餘時數": st.column_config.NumberColumn(
+                "剩餘時數", 
+                min_value=0.0, 
+                step=0.5, 
+                format="%.1f"
+            ),
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        key="leave_editor"
+    )
+
+    if st.button("💾 儲存休假資料", type="primary"):
+        save_leave_data(edited_leave_df)
+        st.rerun()
+
+    # 簡單分析建議
+    st.markdown("### 💡 休假管理建議")
+    st.markdown("""
+    * **優先排休**：請優先安排 **「代休假」**，通常期限較短。
+    * **週期檢查**：每月月底請核對夥伴的 `假別週期`，若接近到期日且剩餘時數仍高，請立即排班消化。
+    * **費用控管**：未休完的特別假與代休假將轉為加班費，直接影響門市 **Labor Cost**。
+    """)
