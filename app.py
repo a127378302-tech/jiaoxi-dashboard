@@ -20,7 +20,6 @@ st.markdown("""
         margin-bottom: 20px;
     }
     .activity-title { font-weight: bold; color: #00704A; font-size: 1.1em; }
-    /* 禮盒庫存條的樣式 */
     .stock-bar-bg { width: 100%; background-color: #e0e0e0; border-radius: 5px; height: 20px; }
     .stock-bar-fill { height: 100%; border-radius: 5px; text-align: center; color: white; font-size: 12px; line-height: 20px;}
 </style>
@@ -111,7 +110,8 @@ def get_main_sheet():
 
 def initialize_sheet(sheet):
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
-    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', '備註']
+    # [更新] 加入外送欄位
+    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '備註']
     df = pd.DataFrame(columns=cols)
     df['日期'] = date_range.astype(str)
     df = df.fillna(0)
@@ -132,9 +132,13 @@ def load_data():
         if not all(c in df.columns for c in required): return initialize_sheet(sheet)
         
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
-        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
+        # [更新] 加入外送欄位到數值處理清單
+        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP']
         for col in numeric_cols:
-            if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            if col in df.columns: 
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            else:
+                df[col] = 0 # 若試算表還沒新增該欄位，預設為 0 避免錯誤
             
         df["當日活動"] = df["日期"].apply(lambda x: get_event_info(x))
         return df
@@ -145,7 +149,14 @@ def load_data():
 def save_data_to_sheet(df):
     try:
         sheet = get_main_sheet()
-        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', '備註']
+        # [更新] 存檔時包含外送欄位
+        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '備註']
+        
+        # 確保所有欄位都存在 (避免 user 手動刪除導致錯誤)
+        for col in save_cols:
+            if col not in df.columns:
+                df[col] = 0 if col != '備註' else ""
+
         save_df = df[save_cols].copy()
         save_df["日期"] = save_df["日期"].astype(str)
         save_df = save_df.fillna(0)
@@ -156,19 +167,16 @@ def save_data_to_sheet(df):
     except Exception as e:
         st.error(f"儲存失敗: {e}")
 
-# --- 3.2 禮盒控管資料處理 (Sheet 2: 工作表2) ---
+# --- 3.2 禮盒控管資料處理 (Sheet 2) ---
 def get_gift_sheet():
     client = get_gspread_client()
     workbook = client.open("Jiaoxi_2026_Data")
     try:
-        # 嘗試取得名為 "工作表2" 的分頁
         return workbook.worksheet("工作表2")
     except:
-        # 如果找不到，嘗試建立或取得第二個分頁
         try:
             return workbook.get_worksheet(1)
         except:
-            # 建立新分頁
             return workbook.add_worksheet(title="工作表2", rows=100, cols=4)
 
 @st.cache_data(ttl=60)
@@ -176,22 +184,19 @@ def load_gift_data():
     try:
         sheet = get_gift_sheet()
         data = sheet.get_all_records()
-        # 定義禮盒控管欄位
         cols = ['檔期', '品項', '原始控量', '剩餘控量']
         
         if not data:
             df = pd.DataFrame(columns=cols)
         else:
             df = pd.DataFrame(data)
-            # 補齊缺失欄位
             for c in cols:
                 if c not in df.columns:
                     df[c] = ""
                     
-        # 確保數值格式正確
         df['原始控量'] = pd.to_numeric(df['原始控量'], errors='coerce').fillna(0).astype(int)
         df['剩餘控量'] = pd.to_numeric(df['剩餘控量'], errors='coerce').fillna(0).astype(int)
-        return df[cols] # 確保欄位順序
+        return df[cols]
     except Exception as e:
         st.error(f"禮盒資料讀取錯誤: {e}")
         return pd.DataFrame(columns=['檔期', '品項', '原始控量', '剩餘控量'])
@@ -199,7 +204,6 @@ def load_gift_data():
 def save_gift_data(df):
     try:
         sheet = get_gift_sheet()
-        # 轉換為 Sheet 格式
         df = df.fillna(0)
         sheet.clear()
         sheet.update([df.columns.values.tolist()] + df.values.tolist())
@@ -214,7 +218,6 @@ with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/zh/d/df/Starbucks_Corporation_Logo_2011.svg", width=100)
     st.title("門市管理系統")
     
-    # [新增] 頁面切換導航
     page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管"], index=0)
     
     st.markdown("---")
@@ -223,10 +226,9 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 頁面 1: 每日營運報表 (原有功能)
+# 頁面 1: 每日營運報表
 # ==========================================
 if page == "📊 每日營運報表":
-    # 時間與公告設定
     tw_tz = datetime.timezone(datetime.timedelta(hours=8))
     today = datetime.datetime.now(tw_tz).date()
     today_event = get_event_info(today)
@@ -242,7 +244,6 @@ if page == "📊 每日營運報表":
 
     st.title("☕ 2026 礁溪門市營運報表")
 
-    # 顯示布告欄
     st.markdown(f"""
     <div class="activity-box">
         <div class="activity-title">📢 門市活動快訊 (Today: {today.strftime('%m/%d')})</div>
@@ -254,12 +255,10 @@ if page == "📊 每日營運報表":
     </div>
     """, unsafe_allow_html=True)
 
-    # 載入資料
     if "df" not in st.session_state: st.session_state.df = load_data()
     df = st.session_state.df
     if df.empty: st.stop()
 
-    # 月份篩選
     current_month = today.month
     selected_month = st.selectbox("月份", range(1, 13), index=current_month-1)
     df["Month"] = pd.to_datetime(df["日期"]).dt.month
@@ -270,7 +269,8 @@ if page == "📊 每日營運報表":
     # 數據輸入區
     st.subheader(f"📝 {selected_month} 月數據輸入")
 
-    tab1, tab2 = st.tabs(["📊 核心業績 (PSD/ADT/AT)", "🥐 商品與庫存 (Product/Waste)"])
+    # [更新] 新增第三個分頁
+    tab1, tab2, tab3 = st.tabs(["📊 核心業績 (PSD/ADT/AT)", "🥐 商品與庫存 (Product/Waste)", "🛵 外送平台 (Delivery)"])
 
     with tab1:
         st.caption("請輸入每日業績。右側「當日活動」為系統自動帶入，供您參考。")
@@ -306,9 +306,24 @@ if page == "📊 每日營運報表":
             },
             use_container_width=True, hide_index=True, num_rows="fixed", key="editor_prod"
         )
+    
+    # [更新] 新增外送分頁內容
+    with tab3:
+        st.caption("請輸入各平台外送業績 (單位：元)")
+        edited_delivery = st.data_editor(
+            current_month_df[['顯示日期', '日期', 'foodpanda', 'foodomo', 'MOP']],
+            column_config={
+                "顯示日期": st.column_config.TextColumn("日期", disabled=True, width="small"),
+                "日期": None,
+                "foodpanda": st.column_config.NumberColumn("Foodpanda", format="$%d"),
+                "foodomo": st.column_config.NumberColumn("Foodomo", format="$%d"),
+                "MOP": st.column_config.NumberColumn("MOP", format="$%d"),
+            },
+            use_container_width=True, hide_index=True, num_rows="fixed", key="editor_delivery"
+        )
 
     if st.button("💾 確認更新 (並自動計算)", type="primary"):
-        # 更新資料邏輯
+        # 更新 KPI
         for i, row in edited_kpi.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -325,10 +340,18 @@ if page == "📊 每日營運報表":
                 cust = float(row["ADT"]) if row["ADT"] > 0 else 1.0
                 df.loc[mask, "AT"] = int(round(actual_psd / cust, 0)) if row["ADT"] > 0 else 0
 
+        # 更新 商品
         for i, row in edited_prod.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
+            for c in cols: df.loc[mask, c] = row[c]
+            
+        # [更新] 更新 外送
+        for i, row in edited_delivery.iterrows():
+            row_date = row["日期"]
+            mask = df["日期"] == row_date
+            cols = ['foodpanda', 'foodomo', 'MOP']
             for c in cols: df.loc[mask, c] = row[c]
 
         save_data_to_sheet(df)
@@ -393,7 +416,8 @@ if page == "📊 每日營運報表":
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        ai_prompt = f"""我是星巴克店經理，請協助分析本門市數據。\n【分析區間】：{period_str}\n\n【每日詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶, 活動：名稱)\n"""
+        # [更新] AI Prompt 增加外送資訊
+        ai_prompt = f"""我是星巴克店經理，請協助分析本門市數據。\n【分析區間】：{period_str}\n\n【每日詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶/熊貓/FDM/MOP, 活動：名稱)\n"""
         
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
         
@@ -406,10 +430,16 @@ if page == "📊 每日營運報表":
                 evt_name = get_event_info(row["日期"])
                 evt_str = f", 活動：{evt_name}" if evt_name else ""
                 
+                # 確保外送欄位有值
+                panda = row.get('foodpanda', 0)
+                fdm = row.get('foodomo', 0)
+                mop = row.get('MOP', 0)
+
                 line_str = (f"{d_str}: 業績${sales:,.0f} /{rate:.1f}%/ 來客{row['ADT']}筆 |"
                             f"客單_${row['AT']} /糕點PSD_${row['糕點PSD']:,.0f}/糕點USD_{row['糕點USD']}個/"
                             f" 報廢USD_{row['糕點報廢USD']}個/Retail商品${row['Retail']:,.0f}/"
-                            f"NCB_{row['NCB']}杯/BAF_{row['BAF']}張/節慶_{row['節慶USD']}個{evt_str}")
+                            f"NCB_{row['NCB']}杯/BAF_{row['BAF']}張/節慶_{row['節慶USD']}個/"
+                            f"熊貓${panda}/FDM${fdm}/MOP${mop}{evt_str}")
                 ai_prompt += f"{line_str}\n"
             if not valid_df.empty:
                 avg_line = (f"\n【區間平均】: 業績${valid_df['實績PSD'].mean():,.0f} / 來客{valid_df['ADT'].mean():,.0f} | "
@@ -417,20 +447,18 @@ if page == "📊 每日營運報表":
                 ai_prompt += avg_line
         else:
             ai_prompt += "(尚無資料)"
-        ai_prompt += "\n\n請針對「活動效益」與「業績缺口」進行分析，告訴我活動日是否有有效拉抬來客或客單？"
+        ai_prompt += "\n\n請針對「活動效益」與「業績缺口」進行分析，並觀察外送平台業績(熊貓/Foodomo/MOP)是否有機會點？"
         st.code(ai_prompt, language="text")
 
 # ==========================================
-# 頁面 2: 節慶禮盒控管 (新增功能)
+# 頁面 2: 節慶禮盒控管
 # ==========================================
 elif page == "🎁 節慶禮盒控管":
     st.title("🎁 節慶禮盒庫存控管")
     st.caption("同步 Google Sheet「工作表2」，可直接下方新增、刪除或修改。")
     
-    # 讀取禮盒資料
     gift_df = load_gift_data()
     
-    # 快速統計
     if not gift_df.empty:
         total_qty = gift_df["原始控量"].sum()
         remain_qty = gift_df["剩餘控量"].sum()
@@ -445,17 +473,15 @@ elif page == "🎁 節慶禮盒控管":
         
         st.markdown("---")
 
-    # 編輯區
-    # 使用 dynamic 讓用戶可以增加 rows
     edited_gift_df = st.data_editor(
         gift_df,
         column_config={
-            "檔期": st.column_config.SelectboxColumn("檔期", options=["母親節", "端午節", "父親節", "中秋節", "CNY", "其他"], required=True),
+            "檔期": st.column_config.SelectboxColumn("檔期", options=["Spring", "Summer", "Moon", "Xmas", "NewYear", "常態"], required=True),
             "品項": st.column_config.TextColumn("禮盒名稱", required=True, width="medium"),
             "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
             "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
         },
-        num_rows="dynamic", # 允許新增刪除
+        num_rows="dynamic",
         use_container_width=True,
         key="gift_editor"
     )
@@ -466,7 +492,6 @@ elif page == "🎁 節慶禮盒控管":
             save_gift_data(edited_gift_df)
             st.rerun()
             
-    # 庫存視覺化條
     st.markdown("### 📊 庫存視覺化")
     if not edited_gift_df.empty:
         for index, row in edited_gift_df.iterrows():
@@ -476,12 +501,9 @@ elif page == "🎁 節慶禮盒控管":
             
             if original > 0:
                 pct = int((remain / original) * 100)
-                sold_pct = 100 - pct
-                
-                # 顏色邏輯：剩很少(紅色)，剩很多(綠色)
-                color = "#28a745" # Green
-                if pct < 20: color = "#dc3545" # Red
-                elif pct < 50: color = "#ffc107" # Yellow
+                color = "#28a745"
+                if pct < 20: color = "#dc3545"
+                elif pct < 50: color = "#ffc107"
                 
                 st.markdown(f"**{name}** (剩 {remain}/{original})")
                 st.markdown(f"""
@@ -491,4 +513,4 @@ elif page == "🎁 節慶禮盒控管":
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-                st.write("") # Spacer
+                st.write("")
