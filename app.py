@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import datetime
+import re
 
 # --- 1. 設定網頁與樣式 ---
 st.set_page_config(page_title="星巴克礁溪門市 | 整合管理系統", page_icon="☕", layout="wide")
@@ -22,6 +23,14 @@ st.markdown("""
     .activity-title { font-weight: bold; color: #00704A; font-size: 1.1em; }
     .stock-bar-bg { width: 100%; background-color: #e0e0e0; border-radius: 5px; height: 20px; }
     .stock-bar-fill { height: 100%; border-radius: 5px; text-align: center; color: white; font-size: 12px; line-height: 20px;}
+    .alert-box {
+        padding: 15px;
+        background-color: #ffebee;
+        border-left: 5px solid #d32f2f;
+        border-radius: 5px;
+        color: #b71c1c;
+        margin-bottom: 15px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -187,7 +196,6 @@ def load_gift_data():
 def save_gift_data(df):
     try:
         sheet = get_gift_sheet()
-        # 存檔時不需要存 '銷售進度' 欄位，這只是顯示用
         save_df = df[['檔期', '品項', '原始控量', '剩餘控量']].fillna(0)
         sheet.clear()
         sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
@@ -210,8 +218,8 @@ def load_leave_data():
     try:
         sheet = get_leave_sheet()
         data = sheet.get_all_records()
-        # [修改] 調整欄位結構
-        cols = ['夥伴姓名', '職級', '假別週期', '特休_剩餘', '代休_剩餘']
+        # [修改] 新增 特殊假 相關欄位
+        cols = ['夥伴姓名', '職級', '假別週期', '特休_剩餘', '代休_剩餘', '特殊假_名稱', '特殊假_總時數', '特殊假_週期', '特殊假_剩餘']
         
         if not data: df = pd.DataFrame(columns=cols)
         else:
@@ -220,12 +228,14 @@ def load_leave_data():
                 if c not in df.columns: df[c] = ""
         
         # 數值轉換
-        for c in ['特休_剩餘', '代休_剩餘']:
+        numeric_fields = ['特休_剩餘', '代休_剩餘', '特殊假_總時數', '特殊假_剩餘']
+        for c in numeric_fields:
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
             
         return df[cols]
     except Exception as e:
-        return pd.DataFrame(columns=['夥伴姓名', '職級', '假別週期', '特休_剩餘', '代休_剩餘'])
+        st.error(f"休假表讀取錯誤: {e}")
+        return pd.DataFrame(columns=['夥伴姓名', '職級', '假別週期', '特休_剩餘', '代休_剩餘', '特殊假_名稱', '特殊假_總時數', '特殊假_週期', '特殊假_剩餘'])
 
 def save_leave_data(df):
     try:
@@ -237,6 +247,18 @@ def save_leave_data(df):
         st.cache_data.clear()
     except Exception as e:
         st.error(f"休假儲存失敗: {e}")
+
+def parse_end_date(period_str):
+    """解析日期區間字串，取出結束日期。格式假設為 YYYYMMDD~YYYYMMDD"""
+    try:
+        # 抓取波浪號後面的8個數字
+        match = re.search(r'~(\d{8})', str(period_str))
+        if match:
+            date_str = match.group(1)
+            return datetime.datetime.strptime(date_str, "%Y%m%d").date()
+    except:
+        return None
+    return None
 
 # --- 4. 主程式 ---
 
@@ -437,7 +459,6 @@ elif page == "🎁 節慶禮盒控管":
     
     gift_df = load_gift_data()
     
-    # 統計看板
     if not gift_df.empty:
         total_qty = gift_df["原始控量"].sum()
         remain_qty = gift_df["剩餘控量"].sum()
@@ -451,7 +472,6 @@ elif page == "🎁 節慶禮盒控管":
         c4.metric("銷售進度", f"{sell_rate:.1f}%")
         st.markdown("---")
 
-    # 禮盒編輯區 (使用 column_config.ProgressColumn 增加視覺化)
     edited_gift_df = st.data_editor(
         gift_df,
         column_config={
@@ -481,31 +501,68 @@ elif page == "🎁 節慶禮盒控管":
 # ==========================================
 elif page == "👥 夥伴休假管理":
     st.title("👥 夥伴休假管理 (Sheet 3)")
-    st.info("此區追蹤夥伴「週期到期日」前的剩餘假別。請特別留意正職夥伴同時擁有特休與代休。")
+    st.info("請輸入「假別週期」 (例: 20250706~20260705)，系統將自動計算到期日並進行預警。")
     
     leave_df = load_leave_data()
     
-    # 統計
+    # --- [新增] 自動偵測到期預警邏輯 ---
+    # 設定台灣時區與今日
+    tw_tz = datetime.timezone(datetime.timedelta(hours=8))
+    today_date = datetime.datetime.now(tw_tz).date()
+    
+    # 預警清單
+    alert_messages = []
+    
     if not leave_df.empty:
-        total_special = leave_df['特休_剩餘'].sum()
-        total_comp = leave_df['代休_剩餘'].sum()
-        total_outstanding = total_special + total_comp
+        for idx, row in leave_df.iterrows():
+            name = row['夥伴姓名']
+            
+            # 1. 檢查一般特代休
+            period_str = str(row['假別週期'])
+            end_date = parse_end_date(period_str)
+            if end_date:
+                days_left = (end_date - today_date).days
+                total_hours = row['特休_剩餘'] + row['代休_剩餘']
+                
+                # 條件：還有剩餘時數 且 90天內到期
+                if 0 <= days_left <= 90 and total_hours > 0:
+                    alert_messages.append(f"⚠️ {name} 的特代休 ({period_str}) 即將於 {end_date} 到期！剩餘 {total_hours} 小時未休。")
+            
+            # 2. 檢查特殊假
+            sp_period_str = str(row['特殊假_週期'])
+            sp_end_date = parse_end_date(sp_period_str)
+            if sp_end_date:
+                days_left_sp = (sp_end_date - today_date).days
+                sp_hours = row['特殊假_剩餘']
+                sp_name = row['特殊假_名稱']
+                
+                if 0 <= days_left_sp <= 90 and sp_hours > 0:
+                    alert_messages.append(f"⚠️ {name} 的 {sp_name} ({sp_period_str}) 即將於 {sp_end_date} 到期！剩餘 {sp_hours} 小時未休。")
+
+    # 顯示預警區塊
+    if alert_messages:
+        st.error(f"🚨 發現 {len(alert_messages)} 筆即將到期的休假！請儘速安排。")
+        for msg in alert_messages:
+            st.markdown(f'<div class="alert-box">{msg}</div>', unsafe_allow_html=True)
+    else:
+        st.success("✅ 目前無 3 個月內即將過期且未休完的假別。")
         
-        col_sum1, col_sum2, col_sum3 = st.columns(3)
-        col_sum1.metric("特休總負債 (時數)", f"{total_special:.1f} hr")
-        col_sum2.metric("代休總負債 (時數)", f"{total_comp:.1f} hr")
-        col_sum3.metric("總計需消化時數", f"{total_outstanding:.1f} hr", delta_color="inverse", delta="越高越危險")
-        st.markdown("---")
+    st.markdown("---")
 
     # 編輯區
     edited_leave_df = st.data_editor(
         leave_df,
         column_config={
-            "夥伴姓名": st.column_config.TextColumn("夥伴姓名", required=True),
+            "夥伴姓名": st.column_config.TextColumn("夥伴姓名", required=True, frozen=True),
             "職級": st.column_config.SelectboxColumn("職級", options=["正職", "PT"], required=True, width="small"),
-            "假別週期": st.column_config.TextColumn("假別週期 (例: 20250706~20260705)", required=True, width="medium"),
-            "特休_剩餘": st.column_config.NumberColumn("特休_剩餘 (hr)", min_value=0.0, step=0.5, format="%.1f"),
-            "代休_剩餘": st.column_config.NumberColumn("代休_剩餘 (hr)", min_value=0.0, step=0.5, format="%.1f", help="PT 夥伴請填 0"),
+            "假別週期": st.column_config.TextColumn("假別週期 (YYYYMMDD~YYYYMMDD)", required=True, width="medium", help="系統依據 '~' 後面的日期判斷到期日"),
+            "特休_剩餘": st.column_config.NumberColumn("特休剩餘", min_value=0.0, step=0.5, format="%.1f"),
+            "代休_剩餘": st.column_config.NumberColumn("代休剩餘", min_value=0.0, step=0.5, format="%.1f"),
+            # [新增] 右側特殊假欄位
+            "特殊假_名稱": st.column_config.TextColumn("特殊假 (自訂)", placeholder="例:婚假"),
+            "特殊假_總時數": st.column_config.NumberColumn("總時數", min_value=0.0, step=0.5),
+            "特殊假_週期": st.column_config.TextColumn("特殊假週期", placeholder="20260101~20260201"),
+            "特殊假_剩餘": st.column_config.NumberColumn("剩餘時數", min_value=0.0, step=0.5, format="%.1f"),
         },
         num_rows="dynamic",
         use_container_width=True,
@@ -518,8 +575,6 @@ elif page == "👥 夥伴休假管理":
 
     st.markdown("### 💡 管理提醒")
     st.markdown("""
-    * **表格填寫規則**：
-        * **正職**：請同時更新「特休」與「代休」欄位，兩者通常在同一天到期。
-        * **PT**：僅需更新「特休」，「代休」欄位請保持為 0。
-    * **費用風險**：上方顯示的「總計需消化時數」若未在週期結束前排休完畢，將會轉為現金發放，增加人事成本。
+    * **到期日自動偵測**：系統會自動抓取「週期」欄位中 **`~`** 符號後面的日期（格式需為 8 碼數字，如 `20260401`）。
+    * **預警規則**：當距離到期日 **< 90 天** 且 **剩餘時數 > 0** 時，上方會出現紅色警示。
     """)
