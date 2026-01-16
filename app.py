@@ -22,11 +22,10 @@ st.markdown("""
     .activity-title { font-weight: bold; color: #00704A; font-size: 1.1em; }
     .stock-bar-bg { width: 100%; background-color: #e0e0e0; border-radius: 5px; height: 20px; }
     .stock-bar-fill { height: 100%; border-radius: 5px; text-align: center; color: white; font-size: 12px; line-height: 20px;}
-    .alert-text { color: #d9534f; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. 資料定義 (假日與行銷活動) ---
+# --- 2. 資料定義 ---
 HOLIDAYS_2026 = {
     "2026-01-01": "🔴 元旦", "2026-02-16": "🔴 小年夜", "2026-02-17": "🔴 除夕",
     "2026-02-18": "🔴 春節", "2026-02-19": "🔴 春節", "2026-02-20": "🔴 春節",
@@ -68,7 +67,6 @@ MARKETING_CALENDAR = {
 }
 
 def get_date_display(date_input):
-    """轉換日期顯示格式"""
     try:
         if isinstance(date_input, str):
             date_obj = pd.to_datetime(date_input).date()
@@ -126,7 +124,6 @@ def load_data():
         if not data: return initialize_sheet(sheet)
         
         df = pd.DataFrame(data)
-        # 簡易檢查
         if '日期' not in df.columns: return initialize_sheet(sheet)
         
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
@@ -180,16 +177,20 @@ def load_gift_data():
                 if c not in df.columns: df[c] = ""
         df['原始控量'] = pd.to_numeric(df['原始控量'], errors='coerce').fillna(0).astype(int)
         df['剩餘控量'] = pd.to_numeric(df['剩餘控量'], errors='coerce').fillna(0).astype(int)
-        return df[cols]
+        
+        # 計算進度百分比 (用於顯示)
+        df['銷售進度'] = df.apply(lambda x: (x['原始控量'] - x['剩餘控量']) / x['原始控量'] if x['原始控量'] > 0 else 0, axis=1)
+        return df
     except Exception as e:
-        return pd.DataFrame(columns=['檔期', '品項', '原始控量', '剩餘控量'])
+        return pd.DataFrame(columns=['檔期', '品項', '原始控量', '剩餘控量', '銷售進度'])
 
 def save_gift_data(df):
     try:
         sheet = get_gift_sheet()
-        df = df.fillna(0)
+        # 存檔時不需要存 '銷售進度' 欄位，這只是顯示用
+        save_df = df[['檔期', '品項', '原始控量', '剩餘控量']].fillna(0)
         sheet.clear()
-        sheet.update([df.columns.values.tolist()] + df.values.tolist())
+        sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
         st.toast("✅ 禮盒庫存已更新！", icon="🎁")
         st.cache_data.clear()
     except Exception as e:
@@ -209,17 +210,22 @@ def load_leave_data():
     try:
         sheet = get_leave_sheet()
         data = sheet.get_all_records()
-        cols = ['夥伴姓名', '假別週期', '假別', '剩餘時數']
+        # [修改] 調整欄位結構
+        cols = ['夥伴姓名', '職級', '假別週期', '特休_剩餘', '代休_剩餘']
+        
         if not data: df = pd.DataFrame(columns=cols)
         else:
             df = pd.DataFrame(data)
             for c in cols:
                 if c not in df.columns: df[c] = ""
-        # 轉換數值
-        df['剩餘時數'] = pd.to_numeric(df['剩餘時數'], errors='coerce').fillna(0)
+        
+        # 數值轉換
+        for c in ['特休_剩餘', '代休_剩餘']:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            
         return df[cols]
     except Exception as e:
-        return pd.DataFrame(columns=['夥伴姓名', '假別週期', '假別', '剩餘時數'])
+        return pd.DataFrame(columns=['夥伴姓名', '職級', '假別週期', '特休_剩餘', '代休_剩餘'])
 
 def save_leave_data(df):
     try:
@@ -237,9 +243,7 @@ def save_leave_data(df):
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/zh/d/df/Starbucks_Corporation_Logo_2011.svg", width=100)
     st.title("門市管理系統")
-    
     page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理"], index=0)
-    
     st.markdown("---")
     if st.button("🔄 重新讀取資料"):
         st.cache_data.clear()
@@ -253,16 +257,13 @@ if page == "📊 每日營運報表":
     today = datetime.datetime.now(tw_tz).date()
     today_event = get_event_info(today)
     if not today_event: today_event = "無特別活動，回歸基本面銷售。"
-
     upcoming_text = []
     for i in range(1, 4):
         future_date = today + datetime.timedelta(days=i)
         evt = get_event_info(future_date)
-        if evt:
-            upcoming_text.append(f"<b>{future_date.strftime('%m/%d')}</b>: {evt}")
+        if evt: upcoming_text.append(f"<b>{future_date.strftime('%m/%d')}</b>: {evt}")
 
     st.title("☕ 2026 礁溪門市營運報表")
-
     st.markdown(f"""
     <div class="activity-box">
         <div class="activity-title">📢 門市活動快訊 (Today: {today.strftime('%m/%d')})</div>
@@ -286,7 +287,6 @@ if page == "📊 每日營運報表":
         current_month_df["顯示日期"] = current_month_df["日期"].apply(get_date_display)
 
     st.subheader(f"📝 {selected_month} 月數據輸入")
-
     tab1, tab2, tab3 = st.tabs(["📊 核心業績 (PSD/ADT/AT)", "🥐 商品與庫存 (Product/Waste)", "🛵 外送平台 (Delivery)"])
 
     with tab1:
@@ -368,7 +368,6 @@ if page == "📊 每日營運報表":
         st.session_state.df = df
         st.rerun()
 
-    # 儀表板
     st.markdown("---")
     current_month_df["Week_Num"] = pd.to_datetime(current_month_df["日期"]).dt.isocalendar().week
     st.subheader("📅 數據檢視與 AI 分析")
@@ -434,10 +433,11 @@ if page == "📊 每日營運報表":
 # ==========================================
 elif page == "🎁 節慶禮盒控管":
     st.title("🎁 節慶禮盒庫存控管")
-    st.caption("同步 Google Sheet「工作表2」，可直接下方新增、刪除或修改。")
+    st.caption("同步 Google Sheet「工作表2」。進度條顯示：紅色=庫存緊張 (賣很好)，綠色=庫存充足。")
     
     gift_df = load_gift_data()
     
+    # 統計看板
     if not gift_df.empty:
         total_qty = gift_df["原始控量"].sum()
         remain_qty = gift_df["剩餘控量"].sum()
@@ -451,14 +451,21 @@ elif page == "🎁 節慶禮盒控管":
         c4.metric("銷售進度", f"{sell_rate:.1f}%")
         st.markdown("---")
 
+    # 禮盒編輯區 (使用 column_config.ProgressColumn 增加視覺化)
     edited_gift_df = st.data_editor(
         gift_df,
         column_config={
-            # [更新] 依據您的需求更新檔期選項
             "檔期": st.column_config.SelectboxColumn("檔期", options=["母親節", "端午節", "父親節", "中秋節", "CNY", "其他"], required=True),
             "品項": st.column_config.TextColumn("禮盒名稱", required=True, width="medium"),
             "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
             "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
+            "銷售進度": st.column_config.ProgressColumn(
+                "銷售進度", 
+                help="已銷售百分比 (越接近100%代表快賣完了)", 
+                format="%.1f%%",
+                min_value=0, 
+                max_value=1
+            ),
         },
         num_rows="dynamic",
         use_container_width=True,
@@ -468,36 +475,26 @@ elif page == "🎁 節慶禮盒控管":
     if st.button("💾 儲存禮盒變更", type="primary"):
         save_gift_data(edited_gift_df)
         st.rerun()
-            
-    st.markdown("### 📊 庫存視覺化")
-    if not edited_gift_df.empty:
-        for index, row in edited_gift_df.iterrows():
-            if row['原始控量'] > 0:
-                pct = int((row['剩餘控量'] / row['原始控量']) * 100)
-                color = "#28a745"
-                if pct < 20: color = "#dc3545"
-                elif pct < 50: color = "#ffc107"
-                st.markdown(f"**{row['品項']}** (剩 {row['剩餘控量']}/{row['原始控量']})")
-                st.markdown(f"""<div class="stock-bar-bg"><div class="stock-bar-fill" style="width: {pct}%; background-color: {color};">{pct}%</div></div>""", unsafe_allow_html=True)
 
 # ==========================================
-# 頁面 3: 夥伴休假管理 (新增)
+# 頁面 3: 夥伴休假管理
 # ==========================================
 elif page == "👥 夥伴休假管理":
     st.title("👥 夥伴休假管理 (Sheet 3)")
-    st.info("此區資料每年會結轉成加班費，請務必密切追蹤「特別假」與「代休假」的剩餘時數。")
+    st.info("此區追蹤夥伴「週期到期日」前的剩餘假別。請特別留意正職夥伴同時擁有特休與代休。")
     
     leave_df = load_leave_data()
     
-    # 統計看板
+    # 統計
     if not leave_df.empty:
-        # 計算總未休時數 (針對特別假與代休假)
-        critical_leaves = leave_df[leave_df['假別'].isin(['特別假', '代休假'])]
-        total_outstanding = critical_leaves['剩餘時數'].sum()
+        total_special = leave_df['特休_剩餘'].sum()
+        total_comp = leave_df['代休_剩餘'].sum()
+        total_outstanding = total_special + total_comp
         
-        col_sum1, col_sum2 = st.columns(2)
-        col_sum1.metric("⚠️ 潛在加班費風險 (時數總計)", f"{total_outstanding:.1f} hr")
-        col_sum2.metric("追蹤中名單數", f"{len(leave_df)} 筆")
+        col_sum1, col_sum2, col_sum3 = st.columns(3)
+        col_sum1.metric("特休總負債 (時數)", f"{total_special:.1f} hr")
+        col_sum2.metric("代休總負債 (時數)", f"{total_comp:.1f} hr")
+        col_sum3.metric("總計需消化時數", f"{total_outstanding:.1f} hr", delta_color="inverse", delta="越高越危險")
         st.markdown("---")
 
     # 編輯區
@@ -505,18 +502,10 @@ elif page == "👥 夥伴休假管理":
         leave_df,
         column_config={
             "夥伴姓名": st.column_config.TextColumn("夥伴姓名", required=True),
+            "職級": st.column_config.SelectboxColumn("職級", options=["正職", "PT"], required=True, width="small"),
             "假別週期": st.column_config.TextColumn("假別週期 (例: 20250706~20260705)", required=True, width="medium"),
-            "假別": st.column_config.SelectboxColumn(
-                "假別類型",
-                options=["特別假", "代休假", "喪假", "婚假", "其他"],
-                required=True
-            ),
-            "剩餘時數": st.column_config.NumberColumn(
-                "剩餘時數", 
-                min_value=0.0, 
-                step=0.5, 
-                format="%.1f"
-            ),
+            "特休_剩餘": st.column_config.NumberColumn("特休_剩餘 (hr)", min_value=0.0, step=0.5, format="%.1f"),
+            "代休_剩餘": st.column_config.NumberColumn("代休_剩餘 (hr)", min_value=0.0, step=0.5, format="%.1f", help="PT 夥伴請填 0"),
         },
         num_rows="dynamic",
         use_container_width=True,
@@ -527,10 +516,10 @@ elif page == "👥 夥伴休假管理":
         save_leave_data(edited_leave_df)
         st.rerun()
 
-    # 簡單分析建議
-    st.markdown("### 💡 休假管理建議")
+    st.markdown("### 💡 管理提醒")
     st.markdown("""
-    * **優先排休**：請優先安排 **「代休假」**，通常期限較短。
-    * **週期檢查**：每月月底請核對夥伴的 `假別週期`，若接近到期日且剩餘時數仍高，請立即排班消化。
-    * **費用控管**：未休完的特別假與代休假將轉為加班費，直接影響門市 **Labor Cost**。
+    * **表格填寫規則**：
+        * **正職**：請同時更新「特休」與「代休」欄位，兩者通常在同一天到期。
+        * **PT**：僅需更新「特休」，「代休」欄位請保持為 0。
+    * **費用風險**：上方顯示的「總計需消化時數」若未在週期結束前排休完畢，將會轉為現金發放，增加人事成本。
     """)
