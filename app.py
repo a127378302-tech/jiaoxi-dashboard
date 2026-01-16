@@ -548,17 +548,17 @@ elif page == "👥 夥伴休假管理":
         st.success("✅ 目前無 3 個月內即將過期且未休完的假別。")
         
     st.markdown("---")
-
-    # 編輯區
+# 編輯區
     edited_leave_df = st.data_editor(
         leave_df,
         column_config={
-            "夥伴姓名": st.column_config.TextColumn("夥伴姓名", required=True, frozen=True),
+            # [修正] 移除不支援的 frozen 參數，若不希望修改名字可加 disabled=True，但在新增模式下通常需要輸入
+            "夥伴姓名": st.column_config.TextColumn("夥伴姓名", required=True), 
             "職級": st.column_config.SelectboxColumn("職級", options=["正職", "PT"], required=True, width="small"),
             "假別週期": st.column_config.TextColumn("假別週期 (YYYYMMDD~YYYYMMDD)", required=True, width="medium", help="系統依據 '~' 後面的日期判斷到期日"),
             "特休_剩餘": st.column_config.NumberColumn("特休剩餘", min_value=0.0, step=0.5, format="%.1f"),
             "代休_剩餘": st.column_config.NumberColumn("代休剩餘", min_value=0.0, step=0.5, format="%.1f"),
-            # [新增] 右側特殊假欄位
+            # 右側特殊假欄位
             "特殊假_名稱": st.column_config.TextColumn("特殊假 (自訂)", placeholder="例:婚假"),
             "特殊假_總時數": st.column_config.NumberColumn("總時數", min_value=0.0, step=0.5),
             "特殊假_週期": st.column_config.TextColumn("特殊假週期", placeholder="20260101~20260201"),
@@ -572,7 +572,7 @@ elif page == "👥 夥伴休假管理":
     if st.button("💾 儲存休假資料", type="primary"):
         save_leave_data(edited_leave_df)
         st.rerun()
-
+   
     st.markdown("### 💡 管理提醒")
     st.markdown("""
     * **到期日自動偵測**：系統會自動抓取「週期」欄位中 **`~`** 符號後面的日期（格式需為 8 碼數字，如 `20260401`）。
