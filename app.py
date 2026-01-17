@@ -187,7 +187,7 @@ def load_gift_data():
         df['原始控量'] = pd.to_numeric(df['原始控量'], errors='coerce').fillna(0).astype(int)
         df['剩餘控量'] = pd.to_numeric(df['剩餘控量'], errors='coerce').fillna(0).astype(int)
         
-        # 計算進度百分比 (用於顯示)
+        # 計算進度百分比
         df['銷售進度'] = df.apply(lambda x: (x['原始控量'] - x['剩餘控量']) / x['原始控量'] if x['原始控量'] > 0 else 0, axis=1)
         return df
     except Exception as e:
@@ -218,7 +218,6 @@ def load_leave_data():
     try:
         sheet = get_leave_sheet()
         data = sheet.get_all_records()
-        # [修改] 新增 特殊假 相關欄位
         cols = ['夥伴姓名', '職級', '假別週期', '特休_剩餘', '代休_剩餘', '特殊假_名稱', '特殊假_總時數', '特殊假_週期', '特殊假_剩餘']
         
         if not data: df = pd.DataFrame(columns=cols)
@@ -227,14 +226,12 @@ def load_leave_data():
             for c in cols:
                 if c not in df.columns: df[c] = ""
         
-        # 數值轉換
         numeric_fields = ['特休_剩餘', '代休_剩餘', '特殊假_總時數', '特殊假_剩餘']
         for c in numeric_fields:
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
             
         return df[cols]
     except Exception as e:
-        st.error(f"休假表讀取錯誤: {e}")
         return pd.DataFrame(columns=['夥伴姓名', '職級', '假別週期', '特休_剩餘', '代休_剩餘', '特殊假_名稱', '特殊假_總時數', '特殊假_週期', '特殊假_剩餘'])
 
 def save_leave_data(df):
@@ -249,7 +246,6 @@ def save_leave_data(df):
         st.error(f"休假儲存失敗: {e}")
 
 def parse_end_date(period_str):
-    """解析日期區間字串，取出結束日期。格式假設為 YYYYMMDD~YYYYMMDD"""
     try:
         # 抓取波浪號後面的8個數字
         match = re.search(r'~(\d{8})', str(period_str))
@@ -403,7 +399,11 @@ if page == "📊 每日營運報表":
         for w in weeks:
             week_data = current_month_df[current_month_df["Week_Num"] == w]
             if not week_data.empty:
-                week_options[f"Week {w}"] = w
+                # [修正] 補回日期區間計算邏輯
+                start_date = week_data["日期"].min().strftime("%m/%d")
+                end_date = week_data["日期"].max().strftime("%m/%d")
+                week_label = f"Week {w} | {start_date} ~ {end_date}"
+                week_options[week_label] = w
         with col_week:
             if week_options:
                 sel_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
@@ -505,12 +505,10 @@ elif page == "👥 夥伴休假管理":
     
     leave_df = load_leave_data()
     
-    # --- [新增] 自動偵測到期預警邏輯 ---
-    # 設定台灣時區與今日
+    # 自動偵測到期預警邏輯
     tw_tz = datetime.timezone(datetime.timedelta(hours=8))
     today_date = datetime.datetime.now(tw_tz).date()
     
-    # 預警清單
     alert_messages = []
     
     if not leave_df.empty:
@@ -523,8 +521,6 @@ elif page == "👥 夥伴休假管理":
             if end_date:
                 days_left = (end_date - today_date).days
                 total_hours = row['特休_剩餘'] + row['代休_剩餘']
-                
-                # 條件：還有剩餘時數 且 90天內到期
                 if 0 <= days_left <= 90 and total_hours > 0:
                     alert_messages.append(f"⚠️ {name} 的特代休 ({period_str}) 即將於 {end_date} 到期！剩餘 {total_hours} 小時未休。")
             
@@ -535,11 +531,9 @@ elif page == "👥 夥伴休假管理":
                 days_left_sp = (sp_end_date - today_date).days
                 sp_hours = row['特殊假_剩餘']
                 sp_name = row['特殊假_名稱']
-                
                 if 0 <= days_left_sp <= 90 and sp_hours > 0:
                     alert_messages.append(f"⚠️ {name} 的 {sp_name} ({sp_period_str}) 即將於 {sp_end_date} 到期！剩餘 {sp_hours} 小時未休。")
 
-    # 顯示預警區塊
     if alert_messages:
         st.error(f"🚨 發現 {len(alert_messages)} 筆即將到期的休假！請儘速安排。")
         for msg in alert_messages:
@@ -548,18 +542,16 @@ elif page == "👥 夥伴休假管理":
         st.success("✅ 目前無 3 個月內即將過期且未休完的假別。")
         
     st.markdown("---")
-# 編輯區
+
+    # 編輯區 (已修正 TextColumn 參數錯誤)
     edited_leave_df = st.data_editor(
         leave_df,
         column_config={
             "夥伴姓名": st.column_config.TextColumn("夥伴姓名", required=True),
             "職級": st.column_config.SelectboxColumn("職級", options=["正職", "PT"], required=True, width="small"),
-            # [修正] 移除 placeholder，改用 help
             "假別週期": st.column_config.TextColumn("假別週期 (YYYYMMDD~YYYYMMDD)", required=True, width="medium", help="系統依據 '~' 後面的日期判斷到期日"),
             "特休_剩餘": st.column_config.NumberColumn("特休剩餘", min_value=0.0, step=0.5, format="%.1f"),
             "代休_剩餘": st.column_config.NumberColumn("代休剩餘", min_value=0.0, step=0.5, format="%.1f"),
-            
-            # [修正] 這裡也移除了 placeholder，改用 help 提示
             "特殊假_名稱": st.column_config.TextColumn("特殊假 (自訂)", help="例: 婚假"),
             "特殊假_總時數": st.column_config.NumberColumn("總時數", min_value=0.0, step=0.5),
             "特殊假_週期": st.column_config.TextColumn("特殊假週期", help="例: 20260101~20260201"),
@@ -573,7 +565,7 @@ elif page == "👥 夥伴休假管理":
     if st.button("💾 儲存休假資料", type="primary"):
         save_leave_data(edited_leave_df)
         st.rerun()
-   
+
     st.markdown("### 💡 管理提醒")
     st.markdown("""
     * **到期日自動偵測**：系統會自動抓取「週期」欄位中 **`~`** 符號後面的日期（格式需為 8 碼數字，如 `20260401`）。
