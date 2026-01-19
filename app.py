@@ -399,7 +399,6 @@ if page == "📊 每日營運報表":
         for w in weeks:
             week_data = current_month_df[current_month_df["Week_Num"] == w]
             if not week_data.empty:
-                # [修正] 補回日期區間計算邏輯
                 start_date = week_data["日期"].min().strftime("%m/%d")
                 end_date = week_data["日期"].max().strftime("%m/%d")
                 week_label = f"Week {w} | {start_date} ~ {end_date}"
@@ -436,18 +435,44 @@ if page == "📊 每日營運報表":
         k5.metric("Retail", f"${valid_df['Retail'].mean():,.0f}")
 
     st.markdown("---")
+    # [更新] 恢復為詳細版數據格式
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        ai_prompt = f"""我是星巴克店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n"""
+        ai_prompt = f"""我是星巴克店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶, 活動：名稱/外送平台)\n"""
+        
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
         if not detail_data.empty:
             for idx, row in detail_data.iterrows():
+                # 準備各項數據
+                d_str = row["日期"].strftime("%m/%d")
+                sales = row['實績PSD']
+                target = row['目標PSD']
+                rate = (sales / target * 100) if target > 0 else 0
+                
+                # 外送資料
                 panda = row.get('foodpanda', 0)
-                line_str = (f"{row['日期']}: 業績${row['實績PSD']:,.0f} /{row['ADT']}筆 | 客單${row['AT']} /熊貓${panda}")
+                fdm = row.get('foodomo', 0)
+                mop = row.get('MOP', 0)
+                delivery_str = f"熊貓${panda}/FDM${fdm}/MOP${mop}"
+                
+                # 活動資料
+                evt_name = get_event_info(row["日期"])
+                if not evt_name: evt_name = "無"
+                
+                # 組合字串
+                line_str = (
+                    f"{d_str}: 業績${sales:,.0f} /達成{rate:.1f}%/ 來客{row['ADT']} | "
+                    f"客單${row['AT']} /糕點PSD${row['糕點PSD']:,.0f}/USD{row['糕點USD']}/"
+                    f"報廢{row['糕點報廢USD']}/Retail${row['Retail']:,.0f}/"
+                    f"NCB{row['NCB']}/BAF{row['BAF']}/節慶${row['節慶USD']}, "
+                    f"活動：{evt_name} / {delivery_str}"
+                )
                 ai_prompt += f"{line_str}\n"
-        else: ai_prompt += "(尚無資料)"
-        ai_prompt += "\n\n請分析活動效益與外送機會點。"
+        else: 
+            ai_prompt += "(尚無資料)"
+        
+        ai_prompt += "\n\n請分析活動效益、業績缺口原因以及外送機會點。"
         st.code(ai_prompt, language="text")
 
 # ==========================================
@@ -543,7 +568,7 @@ elif page == "👥 夥伴休假管理":
         
     st.markdown("---")
 
-    # 編輯區 (已修正 TextColumn 參數錯誤)
+    # 編輯區
     edited_leave_df = st.data_editor(
         leave_df,
         column_config={
