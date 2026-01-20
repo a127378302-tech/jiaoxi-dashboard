@@ -142,6 +142,11 @@ def load_data():
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             else:
                 df[col] = 0
+        
+        # [更新] 強制將「日工時」與「IPLH」轉為 float，確保小數點顯示
+        for col in ['日工時', 'IPLH']:
+            if col in df.columns:
+                df[col] = df[col].astype(float)
             
         df["當日活動"] = df["日期"].apply(lambda x: get_event_info(x))
         return df
@@ -473,7 +478,7 @@ if page == "📊 每日營運報表":
     m4.metric("平均 ADT", f"{avg_adt:,.0f}")
     m5.metric("平均 AT", f"${avg_at:,.0f}")
 
-    # [更新] 第二列看板：顯示平均 PSD
+    # 第二列看板
     st.markdown("##### 🛵 多元通路與效率看板")
     d1, d2, d3, d4, d5 = st.columns(5)
     d1.metric("平均貢獻度", f"${avg_contrib:,.0f}", help="區間總業績 / 區間總工時")
@@ -516,12 +521,13 @@ if page == "📊 每日營運報表":
                 evt_name = get_event_info(row["日期"])
                 if not evt_name: evt_name = "無"
                 
+                # [更新] AI Prompt 小數位數優化
                 line_str = (
                     f"{d_str}: 業績${sales:,.0f} /達成{rate:.1f}%/ 來客{row['ADT']} | "
                     f"客單${row['AT']} /糕點PSD${row['糕點PSD']:,.0f}/USD{row['糕點USD']}/"
                     f"報廢{row['糕點報廢USD']}/Retail${row['Retail']:,.0f}/"
                     f"NCB{row['NCB']}/BAF{row['BAF']}/節慶${row['節慶USD']} | "
-                    f"效率:工時{labor_h}hr/貢獻${contrib}/IPLH{iplh} | "
+                    f"效率:工時{labor_h:.1f}hr/貢獻${contrib}/IPLH{iplh:.1f} | "
                     f"外送:熊貓${panda}/FDM${fdm}/MOP${mop}, "
                     f"活動：{evt_name}"
                 )
