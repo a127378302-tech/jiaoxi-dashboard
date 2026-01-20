@@ -451,13 +451,19 @@ if page == "📊 每日營運報表":
     total_adt = target_df["ADT"].sum()
     avg_at = total_sales / total_adt if total_adt > 0 else 0
 
-    # 計算效率與外送指標
+    # 計算效率與外送指標 (全部轉為 PSD)
     total_labor = target_df["日工時"].sum()
     avg_contrib = (total_sales / total_labor) if total_labor > 0 else 0
     
     total_panda = target_df["foodpanda"].sum()
     total_fdm = target_df["foodomo"].sum()
     total_mop = target_df["MOP"].sum()
+    
+    # 計算外送平均 PSD
+    avg_panda = total_panda / days_count
+    avg_fdm = total_fdm / days_count
+    avg_mop = total_mop / days_count
+    avg_delivery_total = (total_panda + total_fdm + total_mop) / days_count
 
     st.markdown("##### 🏆 核心績效看板")
     m1, m2, m3, m4, m5 = st.columns(5)
@@ -467,14 +473,14 @@ if page == "📊 每日營運報表":
     m4.metric("平均 ADT", f"{avg_adt:,.0f}")
     m5.metric("平均 AT", f"${avg_at:,.0f}")
 
-    # [新增] 第二列看板：多元通路與效率
+    # [更新] 第二列看板：顯示平均 PSD
     st.markdown("##### 🛵 多元通路與效率看板")
     d1, d2, d3, d4, d5 = st.columns(5)
     d1.metric("平均貢獻度", f"${avg_contrib:,.0f}", help="區間總業績 / 區間總工時")
-    d2.metric("外送總業績", f"${total_panda + total_fdm + total_mop:,.0f}")
-    d3.metric("熊貓累積", f"${total_panda:,.0f}")
-    d4.metric("FDM 累積", f"${total_fdm:,.0f}")
-    d5.metric("MOP 累積", f"${total_mop:,.0f}")
+    d2.metric("外送平台 PSD", f"${avg_delivery_total:,.0f}")
+    d3.metric("熊貓 PSD", f"${avg_panda:,.0f}")
+    d4.metric("FDM PSD", f"${avg_fdm:,.0f}")
+    d5.metric("MOP PSD", f"${avg_mop:,.0f}")
 
     st.markdown("##### ⚡ 關鍵指標 (日平均)")
     k1, k2, k3, k4, k5 = st.columns(5)
@@ -489,7 +495,6 @@ if page == "📊 每日營運報表":
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        # [更新] 提示詞包含 外送 與 工時細節
         ai_prompt = f"""我是星巴克店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
         
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
