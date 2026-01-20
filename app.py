@@ -116,7 +116,6 @@ def get_main_sheet():
 
 def initialize_sheet(sheet):
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
-    # [更新] 新增 日工時, 貢獻度, IPLH
     cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '備註']
     df = pd.DataFrame(columns=cols)
     df['日期'] = date_range.astype(str)
@@ -137,7 +136,6 @@ def load_data():
         if '日期' not in df.columns: return initialize_sheet(sheet)
         
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
-        # [更新] 增加工時相關欄位到數值轉換清單
         numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH']
         for col in numeric_cols:
             if col in df.columns: 
@@ -154,7 +152,6 @@ def load_data():
 def save_data_to_sheet(df):
     try:
         sheet = get_main_sheet()
-        # [更新] 存檔欄位包含工時數據
         save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '備註']
         for col in save_cols:
             if col not in df.columns: df[col] = 0 if col != '備註' else ""
@@ -309,7 +306,6 @@ if page == "📊 每日營運報表":
 
     st.subheader(f"📝 {selected_month} 月數據輸入")
     
-    # [更新] 新增第4個 Tab: 人力工時
     tab1, tab2, tab3, tab4 = st.tabs(["📊 核心業績", "🥐 商品與庫存", "🛵 外送平台", "⏱️ 人力工時 (Labor)"])
 
     with tab1:
@@ -360,7 +356,6 @@ if page == "📊 每日營運報表":
             use_container_width=True, hide_index=True, num_rows="fixed", key="editor_delivery"
         )
 
-    # [更新] Tab 4: 人力工時輸入
     with tab4:
         st.caption("請輸入當日總工時，「貢獻度」將於儲存時自動計算 (PSD / 日工時)。")
         edited_labor = st.data_editor(
@@ -405,7 +400,7 @@ if page == "📊 每日營運報表":
             cols = ['foodpanda', 'foodomo', 'MOP']
             for c in cols: df.loc[mask, c] = row[c]
 
-        # 4. [更新] Update Labor & Calculate Contribution
+        # 4. Update Labor
         for i, row in edited_labor.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -414,7 +409,7 @@ if page == "📊 每日營運報表":
                 df.loc[mask, "IPLH"] = row["IPLH"]
                 
                 # 自動計算貢獻度
-                current_psd = df.loc[mask, "實績PSD"].values[0] # 取最新的 PSD
+                current_psd = df.loc[mask, "實績PSD"].values[0]
                 labor_hours = float(row["日工時"])
                 contribution = int(current_psd / labor_hours) if labor_hours > 0 else 0
                 df.loc[mask, "貢獻度"] = contribution
@@ -456,19 +451,30 @@ if page == "📊 每日營運報表":
     total_adt = target_df["ADT"].sum()
     avg_at = total_sales / total_adt if total_adt > 0 else 0
 
-    # [更新] 計算平均貢獻度 (區間總業績 / 區間總工時)
+    # 計算效率與外送指標
     total_labor = target_df["日工時"].sum()
     avg_contrib = (total_sales / total_labor) if total_labor > 0 else 0
+    
+    total_panda = target_df["foodpanda"].sum()
+    total_fdm = target_df["foodomo"].sum()
+    total_mop = target_df["MOP"].sum()
 
-    st.markdown("##### 🏆 績效看板")
-    # [更新] 擴充為 6 欄以放入平均貢獻度
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    st.markdown("##### 🏆 核心績效看板")
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("累積 SALES", f"${total_sales:,.0f}")
     m2.metric("達成率", f"{achieve_rate:.1f}%", delta=f"${total_sales - total_target:,.0f}")
     m3.metric("平均 PSD", f"${total_sales/days_count:,.0f}")
     m4.metric("平均 ADT", f"{avg_adt:,.0f}")
     m5.metric("平均 AT", f"${avg_at:,.0f}")
-    m6.metric("平均貢獻度", f"${avg_contrib:,.0f}", help="計算方式：區間總業績 / 區間總工時")
+
+    # [新增] 第二列看板：多元通路與效率
+    st.markdown("##### 🛵 多元通路與效率看板")
+    d1, d2, d3, d4, d5 = st.columns(5)
+    d1.metric("平均貢獻度", f"${avg_contrib:,.0f}", help="區間總業績 / 區間總工時")
+    d2.metric("外送總業績", f"${total_panda + total_fdm + total_mop:,.0f}")
+    d3.metric("熊貓累積", f"${total_panda:,.0f}")
+    d4.metric("FDM 累積", f"${total_fdm:,.0f}")
+    d5.metric("MOP 累積", f"${total_mop:,.0f}")
 
     st.markdown("##### ⚡ 關鍵指標 (日平均)")
     k1, k2, k3, k4, k5 = st.columns(5)
@@ -483,7 +489,8 @@ if page == "📊 每日營運報表":
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        ai_prompt = f"""我是星巴克店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶/工時/貢獻度, 活動：名稱/外送平台)\n"""
+        # [更新] 提示詞包含 外送 與 工時細節
+        ai_prompt = f"""我是星巴克店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
         
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
         if not detail_data.empty:
@@ -496,22 +503,22 @@ if page == "📊 每日營運報表":
                 panda = row.get('foodpanda', 0)
                 fdm = row.get('foodomo', 0)
                 mop = row.get('MOP', 0)
-                delivery_str = f"熊貓${panda}/FDM${fdm}/MOP${mop}"
                 
+                labor_h = row.get('日工時', 0)
+                contrib = row.get('貢獻度', 0)
+                iplh = row.get('IPLH', 0)
+
                 evt_name = get_event_info(row["日期"])
                 if not evt_name: evt_name = "無"
                 
-                # [更新] AI Prompt 增加工時與貢獻度
-                labor_h = row.get('日工時', 0)
-                contrib = row.get('貢獻度', 0)
-
                 line_str = (
                     f"{d_str}: 業績${sales:,.0f} /達成{rate:.1f}%/ 來客{row['ADT']} | "
                     f"客單${row['AT']} /糕點PSD${row['糕點PSD']:,.0f}/USD{row['糕點USD']}/"
                     f"報廢{row['糕點報廢USD']}/Retail${row['Retail']:,.0f}/"
-                    f"NCB{row['NCB']}/BAF{row['BAF']}/節慶${row['節慶USD']}/"
-                    f"工時{labor_h}hr/貢獻${contrib}, "
-                    f"活動：{evt_name} / {delivery_str}"
+                    f"NCB{row['NCB']}/BAF{row['BAF']}/節慶${row['節慶USD']} | "
+                    f"效率:工時{labor_h}hr/貢獻${contrib}/IPLH{iplh} | "
+                    f"外送:熊貓${panda}/FDM${fdm}/MOP${mop}, "
+                    f"活動：{evt_name}"
                 )
                 ai_prompt += f"{line_str}\n"
         else: 
