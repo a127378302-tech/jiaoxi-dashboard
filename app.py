@@ -187,8 +187,8 @@ def load_gift_data():
         df['原始控量'] = pd.to_numeric(df['原始控量'], errors='coerce').fillna(0).astype(int)
         df['剩餘控量'] = pd.to_numeric(df['剩餘控量'], errors='coerce').fillna(0).astype(int)
         
-        # 計算進度百分比
-        df['銷售進度'] = df.apply(lambda x: (x['原始控量'] - x['剩餘控量']) / x['原始控量'] if x['原始控量'] > 0 else 0, axis=1)
+        # [修正] 計算進度百分比，乘以100以正確顯示 (0.5 -> 50)
+        df['銷售進度'] = df.apply(lambda x: ((x['原始控量'] - x['剩餘控量']) / x['原始控量'] * 100) if x['原始控量'] > 0 else 0, axis=1)
         return df
     except Exception as e:
         return pd.DataFrame(columns=['檔期', '品項', '原始控量', '剩餘控量', '銷售進度'])
@@ -226,9 +226,10 @@ def load_leave_data():
             for c in cols:
                 if c not in df.columns: df[c] = ""
         
+        # [修正] 強制轉換為 float，確保小數點 (0.5) 能被保留
         numeric_fields = ['特休_剩餘', '代休_剩餘', '特殊假_總時數', '特殊假_剩餘']
         for c in numeric_fields:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).astype(float)
             
         return df[cols]
     except Exception as e:
@@ -247,7 +248,6 @@ def save_leave_data(df):
 
 def parse_end_date(period_str):
     try:
-        # 抓取波浪號後面的8個數字
         match = re.search(r'~(\d{8})', str(period_str))
         if match:
             date_str = match.group(1)
@@ -435,7 +435,6 @@ if page == "📊 每日營運報表":
         k5.metric("Retail", f"${valid_df['Retail'].mean():,.0f}")
 
     st.markdown("---")
-    # [更新] 恢復為詳細版數據格式
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
@@ -444,23 +443,19 @@ if page == "📊 每日營運報表":
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
         if not detail_data.empty:
             for idx, row in detail_data.iterrows():
-                # 準備各項數據
                 d_str = row["日期"].strftime("%m/%d")
                 sales = row['實績PSD']
                 target = row['目標PSD']
                 rate = (sales / target * 100) if target > 0 else 0
                 
-                # 外送資料
                 panda = row.get('foodpanda', 0)
                 fdm = row.get('foodomo', 0)
                 mop = row.get('MOP', 0)
                 delivery_str = f"熊貓${panda}/FDM${fdm}/MOP${mop}"
                 
-                # 活動資料
                 evt_name = get_event_info(row["日期"])
                 if not evt_name: evt_name = "無"
                 
-                # 組合字串
                 line_str = (
                     f"{d_str}: 業績${sales:,.0f} /達成{rate:.1f}%/ 來客{row['ADT']} | "
                     f"客單${row['AT']} /糕點PSD${row['糕點PSD']:,.0f}/USD{row['糕點USD']}/"
@@ -504,12 +499,13 @@ elif page == "🎁 節慶禮盒控管":
             "品項": st.column_config.TextColumn("禮盒名稱", required=True, width="medium"),
             "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
             "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
+            # [修正] 增加最大值為100，配合計算邏輯正確顯示 %
             "銷售進度": st.column_config.ProgressColumn(
                 "銷售進度", 
-                help="已銷售百分比 (越接近100%代表快賣完了)", 
+                help="已銷售百分比", 
                 format="%.1f%%",
                 min_value=0, 
-                max_value=1
+                max_value=100
             ),
         },
         num_rows="dynamic",
