@@ -54,6 +54,14 @@ HOLIDAYS_2026 = {
     "2026-06-19": "🔴 端午節", "2026-09-25": "🔴 中秋節", "2026-10-10": "🔴 國慶日",
 }
 
+# [更新] 定義新品波段資訊 (用於跑馬燈)
+NEW_PRODUCT_WAVES = [
+    {"name": "Spring1", "order_date": "2026-02-04", "launch_date": "2026-02-11"},
+    {"name": "Spring2", "order_date": "2026-02-09", "launch_date": "2026-02-25"},
+    {"name": "Spring3", "order_date": "2026-03-02", "launch_date": "2026-03-11"},
+]
+
+# 依據 Winter & Spring PPK 及 1/27 緊急通知建立的活動行事曆
 MARKETING_CALENDAR = {
     "2026-01-01": "🎁 買飲料券送紅包袋開始",
     "2026-01-02": "☕ 新年好友分享日(BAF)",
@@ -354,8 +362,6 @@ def parse_end_date(period_str):
 # --- 4. 主程式 ---
 
 with st.sidebar:
-    # [移除] 側邊欄圖片
-    # st.image("https://upload.wikimedia.org/wikipedia/zh/d/df/Starbucks_Corporation_Logo_2011.svg", width=100)
     st.title("門市管理系統")
     page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
     st.markdown("---")
@@ -371,33 +377,33 @@ if page == "📊 每日營運報表":
     today = datetime.datetime.now(tw_tz).date()
     today_event = get_event_info(today)
     
-    # 準備跑馬燈內容
-    marquee_text = ""
+    # [更新] 跑馬燈邏輯：改為顯示波段提醒
+    marquee_list = []
     if today_event:
-        marquee_text += f"📢 今日重點：{today_event} "
+        marquee_list.append(f"📢 今日重點：{today_event}")
     
-    # 讀取並計算訂貨提醒 (未來7天)
-    product_df = load_product_data()
-    try:
-        product_df['訂貨日_dt'] = pd.to_datetime(product_df['訂貨日'], errors='coerce').dt.date
-        next_week = today + datetime.timedelta(days=7)
-        order_reminders = product_df[
-            (product_df['訂貨日_dt'] >= today) & 
-            (product_df['訂貨日_dt'] <= next_week)
-        ]
-        
-        if not order_reminders.empty:
-            reminder_items = []
-            for idx, row in order_reminders.iterrows():
-                reminder_items.append(f"{row['品名']}({row['訂貨日']}訂)")
-            marquee_text += " | 🛒 近期開放訂貨：" + "、".join(reminder_items)
+    # 檢查波段訂貨日 (前7天 ~ 訂貨日當天)
+    for wave in NEW_PRODUCT_WAVES:
+        try:
+            order_dt = datetime.datetime.strptime(wave["order_date"], "%Y-%m-%d").date()
+            launch_dt = datetime.datetime.strptime(wave["launch_date"], "%Y-%m-%d").date()
             
-    except Exception as e:
-        print(f"Error processing order reminders: {e}")
+            # 計算距離訂貨日的天數
+            days_diff = (order_dt - today).days
+            
+            # 條件：今天在 [訂貨日前7天] 到 [訂貨日當天] 之間
+            if 0 <= days_diff <= 7:
+                o_str = order_dt.strftime('%m/%d')
+                l_str = launch_dt.strftime('%m/%d')
+                marquee_list.append(f"🛒 {o_str}開放訂{l_str}上市{wave['name']}檔期新品")
+        except:
+            pass
+
+    marquee_text = " | ".join(marquee_list)
 
     st.title("☕ 2026 礁溪門市營運報表")
     
-    # [新增] 跑馬燈顯示
+    # 跑馬燈顯示
     if marquee_text:
         st.markdown(f"""
         <div class="marquee-container">
@@ -407,7 +413,6 @@ if page == "📊 每日營運報表":
         </div>
         """, unsafe_allow_html=True)
     else:
-        # 如果沒有活動也沒有訂貨提醒，顯示預設歡迎訊息
         st.markdown(f"""
         <div class="activity-box">
             <div class="activity-title">歡迎回來！</div>
@@ -573,7 +578,6 @@ if page == "📊 每日營運報表":
     total_adt = target_df["ADT"].sum()
     avg_at = total_sales / total_adt if total_adt > 0 else 0
 
-    # 計算效率與外送指標 (全部轉為 PSD)
     total_labor = target_df["日工時"].sum()
     avg_contrib = (total_sales / total_labor) if total_labor > 0 else 0
     
@@ -817,7 +821,7 @@ elif page == "📦 新品查詢與訂貨":
         hide_index=True
     )
     
-    # 近期訂貨提醒
+    # 近期訂貨提醒 (下方列表保留)
     st.markdown("---")
     st.subheader("🔔 近期訂貨提醒 (未來7日)")
     
