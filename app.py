@@ -78,8 +78,6 @@ MARKETING_CALENDAR = {
     "2026-02-02": "☕ 尾牙BAF",
     "2026-02-03": "☕ 尾牙BAF",
     "2026-02-04": "🌟 金星雙倍贈星",
-    
-    # Spring 檔期更新 (依據 1/27 通知與 PPK)
     "2026-02-09": "⭐ 星飲搶鮮(新品會員搶先喝)",
     "2026-02-10": "⭐ 星飲搶鮮 | 🐼 FP好友分享(大杯那/美)",
     "2026-02-11": "🐼 FP第二杯半價/三杯組 | 🛵 FDM新春雙杯組",
@@ -200,7 +198,6 @@ def load_data():
             else:
                 df[col] = 0
         
-        # 強制轉為 float 以確保小數點顯示
         for col in ['日工時', 'IPLH']:
             if col in df.columns:
                 df[col] = df[col].astype(float)
@@ -308,6 +305,33 @@ def save_leave_data(df):
     except Exception as e:
         st.error(f"休假儲存失敗: {e}")
 
+# --- [更新] 3.4 商品資料庫 (Sheet 4) ---
+def get_product_sheet():
+    client = get_gspread_client()
+    workbook = client.open("Jiaoxi_2026_Data")
+    try: return workbook.worksheet("工作表4")
+    except:
+        try: return workbook.get_worksheet(3)
+        except: return workbook.add_worksheet(title="工作表4", rows=100, cols=8)
+
+@st.cache_data(ttl=60)
+def load_product_data():
+    try:
+        sheet = get_product_sheet()
+        data = sheet.get_all_records()
+        # [更新] 新增 檔期 和 備註 欄位
+        cols = ['檔期', '分類', '品號', '品名', '售價', '訂貨日', '上市日', '備註']
+        if not data: df = pd.DataFrame(columns=cols)
+        else:
+            df = pd.DataFrame(data)
+            for c in cols:
+                if c not in df.columns: df[c] = ""
+        df['售價'] = pd.to_numeric(df['售價'], errors='coerce').fillna(0).astype(int)
+        df['品號'] = df['品號'].astype(str)
+        return df[cols]
+    except Exception as e:
+        return pd.DataFrame(columns=['檔期', '分類', '品號', '品名', '售價', '訂貨日', '上市日', '備註'])
+
 def parse_end_date(period_str):
     try:
         match = re.search(r'~(\d{8})', str(period_str))
@@ -323,7 +347,7 @@ def parse_end_date(period_str):
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/zh/d/df/Starbucks_Corporation_Logo_2011.svg", width=100)
     st.title("門市管理系統")
-    page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理"], index=0)
+    page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
     st.markdown("---")
     if st.button("🔄 重新讀取資料"):
         st.cache_data.clear()
@@ -433,7 +457,6 @@ if page == "📊 每日營運報表":
         )
 
     if st.button("💾 確認更新 (並自動計算)", type="primary"):
-        # 1. Update KPI
         for i, row in edited_kpi.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -448,21 +471,18 @@ if page == "📊 每日營運報表":
                 cust = float(row["ADT"]) if row["ADT"] > 0 else 1.0
                 df.loc[mask, "AT"] = int(round(actual_psd / cust, 0)) if row["ADT"] > 0 else 0
 
-        # 2. Update Prod
         for i, row in edited_prod.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
             for c in cols: df.loc[mask, c] = row[c]
             
-        # 3. Update Delivery
         for i, row in edited_delivery.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['foodpanda', 'foodomo', 'MOP']
             for c in cols: df.loc[mask, c] = row[c]
 
-        # 4. Update Labor
         for i, row in edited_labor.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -470,7 +490,6 @@ if page == "📊 每日營運報表":
                 df.loc[mask, "日工時"] = row["日工時"]
                 df.loc[mask, "IPLH"] = row["IPLH"]
                 
-                # 自動計算貢獻度
                 current_psd = df.loc[mask, "實績PSD"].values[0]
                 labor_hours = float(row["日工時"])
                 contribution = int(current_psd / labor_hours) if labor_hours > 0 else 0
@@ -502,7 +521,6 @@ if page == "📊 每日營運報表":
                 sel_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
                 target_df = current_month_df[current_month_df["Week_Num"] == week_options[sel_label]]
 
-    # 計算 Dashboard 數據
     valid_df = target_df[target_df["實績PSD"] > 0]
     days_count = max(valid_df.shape[0], 1)
     
@@ -513,7 +531,6 @@ if page == "📊 每日營運報表":
     total_adt = target_df["ADT"].sum()
     avg_at = total_sales / total_adt if total_adt > 0 else 0
 
-    # 計算效率與外送指標 (全部轉為 PSD)
     total_labor = target_df["日工時"].sum()
     avg_contrib = (total_sales / total_labor) if total_labor > 0 else 0
     
@@ -713,3 +730,69 @@ elif page == "👥 夥伴休假管理":
     * **到期日自動偵測**：系統會自動抓取「週期」欄位中 **`~`** 符號後面的日期（格式需為 8 碼數字，如 `20260401`）。
     * **預警規則**：當距離到期日 **< 90 天** 且 **剩餘時數 > 0** 時，上方會出現紅色警示。
     """)
+
+# ==========================================
+# 頁面 4: 新品查詢與訂貨
+# ==========================================
+elif page == "📦 新品查詢與訂貨":
+    st.title("📦 新品查詢與訂貨 (Sheet 4)")
+    st.caption("同步 Google Sheet「工作表4」。請在此查詢新品的品號、售價與訂貨日。")
+    
+    product_df = load_product_data()
+    
+    # 搜尋功能
+    col_search, col_cat = st.columns(2)
+    with col_search:
+        search_term = st.text_input("🔍 搜尋新品 (輸入品名或品號)", "")
+    with col_cat:
+        # [更新] 新增 檔期 篩選
+        all_seasons = ["全部"] + sorted(list(product_df['檔期'].unique()))
+        selected_season = st.selectbox("📅 依檔期篩選", all_seasons, index=0)
+
+    # 篩選邏輯
+    filtered_df = product_df
+    
+    if selected_season != "全部":
+        filtered_df = filtered_df[filtered_df['檔期'] == selected_season]
+
+    if search_term:
+        filtered_df = filtered_df[
+            filtered_df['品名'].str.contains(search_term, case=False, na=False) |
+            filtered_df['品號'].str.contains(search_term, case=False, na=False)
+        ]
+        
+    st.markdown(f"### 📋 商品清單 ({len(filtered_df)} 筆)")
+    st.dataframe(
+        filtered_df,
+        column_config={
+            "售價": st.column_config.NumberColumn("售價", format="$%d"),
+            "訂貨日": st.column_config.TextColumn("訂貨日", width="small"),
+            "上市日": st.column_config.TextColumn("上市日", width="small"),
+            "備註": st.column_config.TextColumn("備註", width="medium"),
+        },
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # 近期訂貨提醒
+    st.markdown("---")
+    st.subheader("🔔 近期訂貨提醒")
+    
+    tw_tz = datetime.timezone(datetime.timedelta(hours=8))
+    today_date = datetime.datetime.now(tw_tz).date()
+    next_week = today_date + datetime.timedelta(days=7)
+    
+    try:
+        product_df['訂貨日_dt'] = pd.to_datetime(product_df['訂貨日'], errors='coerce').dt.date
+        upcoming_orders = product_df[
+            (product_df['訂貨日_dt'] >= today_date) & 
+            (product_df['訂貨日_dt'] <= next_week)
+        ]
+        
+        if not upcoming_orders.empty:
+            st.warning(f"未來 7 天內共有 {len(upcoming_orders)} 項商品開放訂貨！")
+            st.dataframe(upcoming_orders[['訂貨日', '分類', '品號', '品名', '備註']], hide_index=True)
+        else:
+            st.success("未來 7 天內無新的訂貨排程。")
+    except:
+        st.info("日期格式無法解析，暫無法顯示訂貨提醒。")
