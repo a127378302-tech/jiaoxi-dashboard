@@ -13,14 +13,40 @@ st.markdown("""
     .stNumberInput input { padding: 0px 5px; }
     div[data-testid="stMetricValue"] { font-size: 1.2rem; }
     .big-font { font-size: 18px !important; font-weight: bold; }
+    /* 大看板樣式 */
     .activity-box { 
-        padding: 15px; 
-        background-color: #f0f2f6; 
-        border-radius: 10px; 
-        border-left: 5px solid #00704A; 
-        margin-bottom: 20px;
+        padding: 20px; 
+        background-color: #f8f9fa; 
+        border-radius: 12px; 
+        border-left: 8px solid #00704A; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin-bottom: 25px;
     }
-    .activity-title { font-weight: bold; color: #00704A; font-size: 1.1em; }
+    .activity-title { 
+        font-weight: bold; 
+        color: #00704A; 
+        font-size: 1.3em; 
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+    }
+    .main-event {
+        font-size: 1.6em; 
+        color: #333; 
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+    .order-alert {
+        background-color: #ffebee;
+        color: #c62828;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-weight: bold;
+        font-size: 1.1em;
+        margin-top: 10px;
+        display: inline-block;
+        border: 1px solid #ffcdd2;
+    }
     .stock-bar-bg { width: 100%; background-color: #e0e0e0; border-radius: 5px; height: 20px; }
     .stock-bar-fill { height: 100%; border-radius: 5px; text-align: center; color: white; font-size: 12px; line-height: 20px;}
     .alert-box {
@@ -30,17 +56,6 @@ st.markdown("""
         border-radius: 5px;
         color: #b71c1c;
         margin-bottom: 15px;
-    }
-    /* 跑馬燈樣式 */
-    .marquee-container {
-        background-color: #fff3cd;
-        color: #856404;
-        padding: 10px;
-        border: 1px solid #ffeeba;
-        border-radius: 5px;
-        margin-bottom: 15px;
-        font-weight: bold;
-        font-size: 1.1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -54,14 +69,14 @@ HOLIDAYS_2026 = {
     "2026-06-19": "🔴 端午節", "2026-09-25": "🔴 中秋節", "2026-10-10": "🔴 國慶日",
 }
 
-# [更新] 定義新品波段資訊 (用於跑馬燈)
+# 新品波段資訊
 NEW_PRODUCT_WAVES = [
     {"name": "Spring1", "order_date": "2026-02-04", "launch_date": "2026-02-11"},
     {"name": "Spring2", "order_date": "2026-02-09", "launch_date": "2026-02-25"},
     {"name": "Spring3", "order_date": "2026-03-02", "launch_date": "2026-03-11"},
 ]
 
-# 依據 Winter & Spring PPK 及 1/27 緊急通知建立的活動行事曆
+# 行銷活動行事曆
 MARKETING_CALENDAR = {
     "2026-01-01": "🎁 買飲料券送紅包袋開始",
     "2026-01-02": "☕ 新年好友分享日(BAF)",
@@ -376,49 +391,39 @@ if page == "📊 每日營運報表":
     tw_tz = datetime.timezone(datetime.timedelta(hours=8))
     today = datetime.datetime.now(tw_tz).date()
     today_event = get_event_info(today)
+    today_str = today.strftime('%m/%d')
     
-    # [更新] 跑馬燈邏輯：改為顯示波段提醒
-    marquee_list = []
-    if today_event:
-        marquee_list.append(f"📢 今日重點：{today_event}")
-    
-    # 檢查波段訂貨日 (前7天 ~ 訂貨日當天)
+    # 產生訂貨提醒 (依據波段 Spring1/2/3)
+    active_waves_list = []
     for wave in NEW_PRODUCT_WAVES:
         try:
             order_dt = datetime.datetime.strptime(wave["order_date"], "%Y-%m-%d").date()
             launch_dt = datetime.datetime.strptime(wave["launch_date"], "%Y-%m-%d").date()
             
-            # 計算距離訂貨日的天數
+            # 計算距離訂貨日的天數 (今天 - 訂貨日)
             days_diff = (order_dt - today).days
             
             # 條件：今天在 [訂貨日前7天] 到 [訂貨日當天] 之間
+            # days_diff 會是正數 (未到訂貨日) 或 0 (訂貨日當天)
             if 0 <= days_diff <= 7:
                 o_str = order_dt.strftime('%m/%d')
                 l_str = launch_dt.strftime('%m/%d')
-                marquee_list.append(f"🛒 {o_str}開放訂{l_str}上市{wave['name']}檔期新品")
+                active_waves_list.append(f"🛒 {o_str}開放訂 / {l_str}上市 {wave['name']}檔期新品")
         except:
             pass
 
-    marquee_text = " | ".join(marquee_list)
-
     st.title("☕ 2026 礁溪門市營運報表")
     
-    # 跑馬燈顯示
-    if marquee_text:
-        st.markdown(f"""
-        <div class="marquee-container">
-            <marquee behavior="scroll" direction="left" scrollamount="6">
-                {marquee_text}
-            </marquee>
+    # 大看板顯示
+    st.markdown(f"""
+    <div class="activity-box">
+        <div class="activity-title">📢 門市活動快訊 (Today: {today_str})</div>
+        <div class="main-event">
+            👉 今日重點：{today_event if today_event else "無特別活動"}
         </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class="activity-box">
-            <div class="activity-title">歡迎回來！</div>
-            <div>今日無特殊活動或訂貨提醒。</div>
-        </div>
-        """, unsafe_allow_html=True)
+        {''.join([f'<div class="order-alert">{msg}</div>' for msg in active_waves_list])}
+    </div>
+    """, unsafe_allow_html=True)
 
     if "df" not in st.session_state: st.session_state.df = load_data()
     df = st.session_state.df
@@ -792,7 +797,6 @@ elif page == "📦 新品查詢與訂貨":
     with col_search:
         search_term = st.text_input("🔍 搜尋新品 (輸入品名或品號)", "")
     with col_cat:
-        # 新增 檔期 篩選
         all_seasons = ["全部"] + sorted(list(product_df['檔期'].unique()))
         selected_season = st.selectbox("📅 依檔期篩選", all_seasons, index=0)
 
@@ -821,7 +825,7 @@ elif page == "📦 新品查詢與訂貨":
         hide_index=True
     )
     
-    # 近期訂貨提醒 (下方列表保留)
+    # 近期訂貨提醒
     st.markdown("---")
     st.subheader("🔔 近期訂貨提醒 (未來7日)")
     
