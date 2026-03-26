@@ -447,30 +447,36 @@ def parse_end_date(period_str):
         return None
     return None
 
-# --- 4. 主程式 ---
+
+# ==========================================
+# 4. 主程式 UI 佈局
+# ==========================================
+
+# [更新] 將選擇門市移至主畫面最上方
+col_store, col_empty = st.columns([1, 3])
+with col_store:
+    store_choice = st.selectbox("🏠 選擇管理門市", ["礁溪門市", "羅東門市"])
+
+sheet_mapping = {
+    "礁溪門市": "Jiaoxi_2026_Data",
+    "羅東門市": "Luodong_2026_Data"
+}
+current_sheet = sheet_mapping[store_choice]
+
+# 偵測門市切換並清除快取
+if "current_store" not in st.session_state:
+    st.session_state.current_store = store_choice
+
+if st.session_state.current_store != store_choice:
+    st.session_state.current_store = store_choice
+    st.cache_data.clear() 
+    st.session_state.df = load_data(current_sheet)
+    st.rerun()
+
+st.markdown("---")
 
 with st.sidebar:
-    st.title("☕ 門市整合管理系統")
-    
-    # [新增] 門市選擇下拉選單
-    store_choice = st.selectbox("🏠 選擇門市", ["礁溪門市", "羅東門市"])
-    
-    # 對應的 Google Sheet 名稱
-    sheet_mapping = {
-        "礁溪門市": "Jiaoxi_2026_Data",
-        "羅東門市": "Luodong_2026_Data"
-    }
-    current_sheet = sheet_mapping[store_choice]
-    
-    # 若切換門市，強制更新 session 狀態以重新載入數據
-    if "current_store" not in st.session_state:
-        st.session_state.current_store = store_choice
-
-    if st.session_state.current_store != store_choice:
-        st.session_state.current_store = store_choice
-        st.session_state.df = load_data(current_sheet)
-
-    st.markdown("---")
+    st.title("☕ 門市管理系統")
     page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
     st.markdown("---")
     if st.button("🔄 重新讀取資料"):
@@ -501,7 +507,6 @@ if page == "📊 每日營運報表":
         except:
             pass
 
-    # [動態更新] 標題加入門市名稱
     st.title(f"☕ 2026 {store_choice}營運報表")
     
     st.markdown(f"""
@@ -707,7 +712,6 @@ if page == "📊 每日營運報表":
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        # [動態更新] AI Prompt 會自動帶入住目前的門市名稱
         ai_prompt = f"""我是星巴克{store_choice}的店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
         
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
