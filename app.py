@@ -267,13 +267,24 @@ def get_gspread_client():
         client = gspread.authorize(creds)
         return client
     except Exception as e:
-        st.error(f"❌ GCP 連線錯誤：{str(e)}")
+        st.error(f"❌ GCP 認證錯誤：請確認 Streamlit Secrets 設定正確。\n{str(e)}")
+        st.stop()
+
+def get_workbook(sheet_name):
+    client = get_gspread_client()
+    try:
+        return client.open(sheet_name)
+    except gspread.exceptions.SpreadsheetNotFound:
+        st.error(f"❌ **嚴重錯誤：找不到 Google 試算表「{sheet_name}」**")
+        st.warning("👉 **請確認以下 2 點：**\n\n1. 您的 Google Drive 中確實有這個檔名的試算表。\n2. **(最常見)** 您是否已點擊試算表右上角的「共用」，將您的 GCP 服務帳號 Email 加入並設為「編輯者」？")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ 連線到試算表時發生未知錯誤: {e}")
         st.stop()
 
 # --- 3.1 營運報表 (Sheet 1) ---
 def get_main_sheet(sheet_name):
-    client = get_gspread_client()
-    return client.open(sheet_name).sheet1
+    return get_workbook(sheet_name).sheet1
 
 def initialize_sheet(sheet):
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
@@ -333,8 +344,7 @@ def save_data_to_sheet(sheet_name, df):
 
 # --- 3.2 禮盒控管 (Sheet 2) ---
 def get_gift_sheet(sheet_name):
-    client = get_gspread_client()
-    workbook = client.open(sheet_name)
+    workbook = get_workbook(sheet_name)
     try: return workbook.worksheet("工作表2")
     except:
         try: return workbook.get_worksheet(1)
@@ -362,6 +372,7 @@ def load_gift_data(sheet_name):
 def save_gift_data(sheet_name, df):
     try:
         sheet = get_gift_sheet(sheet_name)
+        # 存檔時只存原本的欄位，不存顯示用的「銷售進度」
         save_df = df[['檔期', '品項', '原始控量', '剩餘控量']].fillna(0)
         sheet.clear()
         sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
@@ -372,8 +383,7 @@ def save_gift_data(sheet_name, df):
 
 # --- 3.3 夥伴休假管理 (Sheet 3) ---
 def get_leave_sheet(sheet_name):
-    client = get_gspread_client()
-    workbook = client.open(sheet_name)
+    workbook = get_workbook(sheet_name)
     try: return workbook.worksheet("工作表3")
     except:
         try: return workbook.get_worksheet(2)
@@ -413,8 +423,7 @@ def save_leave_data(sheet_name, df):
 
 # --- 3.4 商品資料庫 (Sheet 4) ---
 def get_product_sheet(sheet_name):
-    client = get_gspread_client()
-    workbook = client.open(sheet_name)
+    workbook = get_workbook(sheet_name)
     try: return workbook.worksheet("工作表4")
     except:
         try: return workbook.get_worksheet(3)
@@ -446,6 +455,7 @@ def parse_end_date(period_str):
     except:
         return None
     return None
+
 
 # ==========================================
 # 4. 主程式 UI 佈局
@@ -727,6 +737,7 @@ if page == "📊 每日營運報表":
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
+        # [動態更新] AI Prompt 會自動帶入住目前的門市名稱
         ai_prompt = f"""我是星巴克{store_choice}的店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
         
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
@@ -771,11 +782,23 @@ elif page == "🎁 節慶禮盒控管":
     st.title(f"🎁 {store_choice} | 節慶禮盒庫存控管")
     st.caption("同步對應門市的 Google Sheet。進度條顯示：紅色=庫存緊張 (賣很好)，綠色=庫存充足。")
     
-    gift_df = load_gift_data(current_sheet)
+    # 讀取完整資料
+    full_gift_df = load_gift_data(current_sheet)
     
-    if not gift_df.empty:
-        total_qty = gift_df["原始控量"].sum()
-        remain_qty = gift_df["剩餘控量"].sum()
+    # [新增] 檔期篩選功能
+    season_options = ["全部", "母親節", "端午節", "父親節", "中秋節", "CNY", "其他"]
+    selected_season = st.selectbox("📅 選擇顯示檔期", season_options, index=0)
+    
+    # 根據選擇篩選要顯示的資料
+    if selected_season == "全部":
+        display_df = full_gift_df.copy()
+    else:
+        display_df = full_gift_df[full_gift_df['檔期'] == selected_season].copy()
+    
+    # 統計數據 (只計算篩選後的資料)
+    if not display_df.empty:
+        total_qty = display_df["原始控量"].sum()
+        remain_qty = display_df["剩餘控量"].sum()
         sold_qty = total_qty - remain_qty
         sell_rate = (sold_qty / total_qty * 100) if total_qty > 0 else 0
         
@@ -786,8 +809,9 @@ elif page == "🎁 節慶禮盒控管":
         c4.metric("銷售進度", f"{sell_rate:.1f}%")
         st.markdown("---")
 
-    edited_gift_df = st.data_editor(
-        gift_df,
+    # 編輯區 (顯示篩選後的資料)
+    edited_display_df = st.data_editor(
+        display_df,
         column_config={
             "檔期": st.column_config.SelectboxColumn("檔期", options=["母親節", "端午節", "父親節", "中秋節", "CNY", "其他"], required=True),
             "品項": st.column_config.TextColumn("禮盒名稱", required=True, width="medium"),
@@ -806,8 +830,17 @@ elif page == "🎁 節慶禮盒控管":
         key="gift_editor"
     )
     
+    # [更新] 儲存邏輯：將編輯後的資料與隱藏的資料合併後再存檔
     if st.button("💾 儲存禮盒變更", type="primary"):
-        save_gift_data(current_sheet, edited_gift_df)
+        if selected_season == "全部":
+            final_save_df = edited_display_df
+        else:
+            # 抓出原本資料中「不是」當前檔期的資料 (保留它們)
+            other_season_df = full_gift_df[full_gift_df['檔期'] != selected_season]
+            # 將保留的資料與剛剛編輯完的資料合併
+            final_save_df = pd.concat([other_season_df, edited_display_df], ignore_index=True)
+            
+        save_gift_data(current_sheet, final_save_df)
         st.rerun()
 
 # ==========================================
@@ -880,14 +913,18 @@ elif page == "👥 夥伴休假管理":
         save_leave_data(current_sheet, edited_leave_df)
         st.rerun()
 
+    st.markdown("### 💡 管理提醒")
+    st.markdown("""
+    * **到期日自動偵測**：系統會自動抓取「週期」欄位中 **`~`** 符號後面的日期（格式需為 8 碼數字，如 `20260401`）。
+    * **預警規則**：當距離到期日 **< 90 天** 且 **剩餘時數 > 0** 時，上方會出現紅色警示。
+    """)
+
 # ==========================================
 # 頁面 4: 新品查詢與訂貨
 # ==========================================
 elif page == "📦 新品查詢與訂貨":
-    st.title("📦 新品查詢與訂貨")
-    st.caption("新品清單全門市共通，方便您快速查詢。")
+    st.title(f"📦 {store_choice} | 新品查詢與訂貨")
     
-    # 這裡可以直接固定讀取礁溪的資料庫，或是當前選的，因為通常全區新品都一樣
     product_df = load_product_data(current_sheet)
     
     col_search, col_cat = st.columns(2)
