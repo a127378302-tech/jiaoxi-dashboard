@@ -447,40 +447,44 @@ def parse_end_date(period_str):
         return None
     return None
 
-
 # ==========================================
 # 4. 主程式 UI 佈局
 # ==========================================
 
-# [更新] 將選擇門市移至主畫面最上方
+# --- 門市選擇 (主畫面最上方) ---
 col_store, col_empty = st.columns([1, 3])
 with col_store:
     store_choice = st.selectbox("🏠 選擇管理門市", ["礁溪門市", "羅東門市"])
 
+# 定義對應的 Google Sheet 名稱
 sheet_mapping = {
     "礁溪門市": "Jiaoxi_2026_Data",
     "羅東門市": "Luodong_2026_Data"
 }
 current_sheet = sheet_mapping[store_choice]
 
-# 偵測門市切換並清除快取
+# 偵測門市切換並清除舊快取
 if "current_store" not in st.session_state:
     st.session_state.current_store = store_choice
 
 if st.session_state.current_store != store_choice:
     st.session_state.current_store = store_choice
     st.cache_data.clear() 
-    st.session_state.df = load_data(current_sheet)
+    if "df" in st.session_state:
+        del st.session_state["df"]
     st.rerun()
 
 st.markdown("---")
 
+# --- 側邊欄 ---
 with st.sidebar:
     st.title("☕ 門市管理系統")
     page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
     st.markdown("---")
     if st.button("🔄 重新讀取資料"):
         st.cache_data.clear()
+        if "df" in st.session_state:
+            del st.session_state["df"]
         st.rerun()
 
 # ==========================================
@@ -492,14 +496,17 @@ if page == "📊 每日營運報表":
     today_event = get_event_info(today)
     today_str = today.strftime('%m/%d')
     
+    # 產生訂貨提醒 (依據波段 Spring1/2/3, Summer1_主打/Phase2)
     active_waves_list = []
     for wave in NEW_PRODUCT_WAVES:
         try:
             order_dt = datetime.datetime.strptime(wave["order_date"], "%Y-%m-%d").date()
             launch_dt = datetime.datetime.strptime(wave["launch_date"], "%Y-%m-%d").date()
             
+            # 計算距離訂貨日的天數 (今天 - 訂貨日)
             days_diff = (order_dt - today).days
             
+            # 條件：今天在 [訂貨日前7天] 到 [訂貨日當天] 之間
             if 0 <= days_diff <= 7:
                 o_str = order_dt.strftime('%m/%d')
                 l_str = launch_dt.strftime('%m/%d')
@@ -509,6 +516,7 @@ if page == "📊 每日營運報表":
 
     st.title(f"☕ 2026 {store_choice}營運報表")
     
+    # 大看板顯示
     st.markdown(f"""
     <div class="activity-box">
         <div class="activity-title">📢 門市活動快訊 (Today: {today_str})</div>
@@ -597,6 +605,7 @@ if page == "📊 每日營運報表":
         )
 
     if st.button("💾 確認更新 (並自動計算)", type="primary"):
+        # 1. Update KPI
         for i, row in edited_kpi.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -611,18 +620,21 @@ if page == "📊 每日營運報表":
                 cust = float(row["ADT"]) if row["ADT"] > 0 else 1.0
                 df.loc[mask, "AT"] = int(round(actual_psd / cust, 0)) if row["ADT"] > 0 else 0
 
+        # 2. Update Prod
         for i, row in edited_prod.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
             for c in cols: df.loc[mask, c] = row[c]
             
+        # 3. Update Delivery
         for i, row in edited_delivery.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['foodpanda', 'foodomo', 'MOP']
             for c in cols: df.loc[mask, c] = row[c]
 
+        # 4. Update Labor
         for i, row in edited_labor.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -630,6 +642,7 @@ if page == "📊 每日營運報表":
                 df.loc[mask, "日工時"] = row["日工時"]
                 df.loc[mask, "IPLH"] = row["IPLH"]
                 
+                # 自動計算貢獻度
                 current_psd = df.loc[mask, "實績PSD"].values[0]
                 labor_hours = float(row["日工時"])
                 contribution = int(current_psd / labor_hours) if labor_hours > 0 else 0
@@ -661,6 +674,7 @@ if page == "📊 每日營運報表":
                 sel_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
                 target_df = current_month_df[current_month_df["Week_Num"] == week_options[sel_label]]
 
+    # 計算 Dashboard 數據
     valid_df = target_df[target_df["實績PSD"] > 0]
     days_count = max(valid_df.shape[0], 1)
     
@@ -671,6 +685,7 @@ if page == "📊 每日營運報表":
     total_adt = target_df["ADT"].sum()
     avg_at = total_sales / total_adt if total_adt > 0 else 0
 
+    # 計算效率與外送指標 (全部轉為 PSD)
     total_labor = target_df["日工時"].sum()
     avg_contrib = (total_sales / total_labor) if total_labor > 0 else 0
     
@@ -754,7 +769,7 @@ if page == "📊 每日營運報表":
 # ==========================================
 elif page == "🎁 節慶禮盒控管":
     st.title(f"🎁 {store_choice} | 節慶禮盒庫存控管")
-    st.caption("進度條顯示：紅色=庫存緊張 (賣很好)，綠色=庫存充足。")
+    st.caption("同步對應門市的 Google Sheet。進度條顯示：紅色=庫存緊張 (賣很好)，綠色=庫存充足。")
     
     gift_df = load_gift_data(current_sheet)
     
@@ -804,6 +819,7 @@ elif page == "👥 夥伴休假管理":
     
     leave_df = load_leave_data(current_sheet)
     
+    # 自動偵測到期預警邏輯
     tw_tz = datetime.timezone(datetime.timedelta(hours=8))
     today_date = datetime.datetime.now(tw_tz).date()
     
@@ -813,6 +829,7 @@ elif page == "👥 夥伴休假管理":
         for idx, row in leave_df.iterrows():
             name = row['夥伴姓名']
             
+            # 1. 檢查一般特代休
             period_str = str(row['假別週期'])
             end_date = parse_end_date(period_str)
             if end_date:
@@ -821,6 +838,7 @@ elif page == "👥 夥伴休假管理":
                 if 0 <= days_left <= 90 and total_hours > 0:
                     alert_messages.append(f"⚠️ {name} 的特代休 ({period_str}) 即將於 {end_date} 到期！剩餘 {total_hours} 小時未休。")
             
+            # 2. 檢查特殊假
             sp_period_str = str(row['特殊假_週期'])
             sp_end_date = parse_end_date(sp_period_str)
             if sp_end_date:
@@ -839,6 +857,7 @@ elif page == "👥 夥伴休假管理":
         
     st.markdown("---")
 
+    # 編輯區
     edited_leave_df = st.data_editor(
         leave_df,
         column_config={
@@ -865,8 +884,10 @@ elif page == "👥 夥伴休假管理":
 # 頁面 4: 新品查詢與訂貨
 # ==========================================
 elif page == "📦 新品查詢與訂貨":
-    st.title(f"📦 {store_choice} | 新品查詢與訂貨")
+    st.title("📦 新品查詢與訂貨")
+    st.caption("新品清單全門市共通，方便您快速查詢。")
     
+    # 這裡可以直接固定讀取礁溪的資料庫，或是當前選的，因為通常全區新品都一樣
     product_df = load_product_data(current_sheet)
     
     col_search, col_cat = st.columns(2)
