@@ -56,16 +56,6 @@ st.markdown("""
         color: #b71c1c;
         margin-bottom: 15px;
     }
-    .marquee-container {
-        background-color: #fff3cd;
-        color: #856404;
-        padding: 10px;
-        border: 1px solid #ffeeba;
-        border-radius: 5px;
-        margin-bottom: 15px;
-        font-weight: bold;
-        font-size: 1.1rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -76,6 +66,18 @@ HOLIDAYS_2026 = {
     "2026-02-28": "🔴 228紀念日", "2026-04-03": "🔴 兒童節(補)", "2026-04-04": "🔴 兒童節",
     "2026-04-05": "🔴 清明節", "2026-04-06": "🔴 清明節(補)", "2026-05-01": "🔴 勞動節",
     "2026-06-19": "🔴 端午節", "2026-09-25": "🔴 中秋節", "2026-10-10": "🔴 國慶日",
+}
+
+# [新增] 2026 每月門市業績總目標
+MONTHLY_TARGETS = {
+    "礁溪門市": {
+        1: 2750000, 2: 2500000, 3: 2150000, 4: 2400000, 5: 2600000, 6: 2600000,
+        7: 2850000, 8: 3000000, 9: 2500000, 10: 2600000, 11: 2450000, 12: 2600000
+    },
+    "羅東門市": {
+        1: 2650000, 2: 2550000, 3: 2400000, 4: 2500000, 5: 2750000, 6: 2750000,
+        7: 3000000, 8: 2900000, 9: 2650000, 10: 2800000, 11: 2650000, 12: 2700000
+    }
 }
 
 NEW_PRODUCT_WAVES = [
@@ -158,7 +160,7 @@ MARKETING_CALENDAR = {
     "2026-03-17": "🐼 FP好友分享 | 🐼 FP第二杯半價",
     "2026-03-18": "🎫 金星好友分享 | 🛵 FDM好友分享 | 🐼 FP第二杯半價",
     "2026-03-19": "🎫 金星好友分享 | 🛵 FDM好友分享",
-    "2026-03-20": "🛍️ 28週年購物派對(85折) | 🎫 金星好友分享 | 🛵 FDM好友分享",
+    "2026-03-20": "🛍️ 28週年購物派驚(85折) | 🎫 金星好友分享 | 🛵 FDM好友分享",
     "2026-03-21": "⭐ 週末星夜Bonus Star | 🐼 FP第二杯半價",
     "2026-03-22": "⭐ 週末星夜Bonus Star | 🐼 FP第二杯半價",
     "2026-03-23": "☕ 星享成雙BAF",
@@ -276,7 +278,6 @@ def get_workbook(sheet_name):
         return client.open(sheet_name)
     except gspread.exceptions.SpreadsheetNotFound:
         st.error(f"❌ **嚴重錯誤：找不到 Google 試算表「{sheet_name}」**")
-        st.warning("👉 **請確認以下 2 點：**\n\n1. 您的 Google Drive 中確實有這個檔名的試算表。\n2. **(最常見)** 您是否已點擊試算表右上角的「共用」，將您的 GCP 服務帳號 Email 加入並設為「編輯者」？")
         st.stop()
     except Exception as e:
         st.error(f"❌ 連線到試算表時發生未知錯誤: {e}")
@@ -372,7 +373,6 @@ def load_gift_data(sheet_name):
 def save_gift_data(sheet_name, df):
     try:
         sheet = get_gift_sheet(sheet_name)
-        # 存檔時只存原本的欄位，不存顯示用的「銷售進度」
         save_df = df[['檔期', '品項', '原始控量', '剩餘控量']].fillna(0)
         sheet.clear()
         sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
@@ -461,19 +461,16 @@ def parse_end_date(period_str):
 # 4. 主程式 UI 佈局
 # ==========================================
 
-# --- 門市選擇 (主畫面最上方) ---
 col_store, col_empty = st.columns([1, 3])
 with col_store:
     store_choice = st.selectbox("🏠 選擇管理門市", ["礁溪門市", "羅東門市"])
 
-# 定義對應的 Google Sheet 名稱
 sheet_mapping = {
     "礁溪門市": "Jiaoxi_2026_Data",
     "羅東門市": "Luodong_2026_Data"
 }
 current_sheet = sheet_mapping[store_choice]
 
-# 偵測門市切換並清除舊快取
 if "current_store" not in st.session_state:
     st.session_state.current_store = store_choice
 
@@ -486,7 +483,6 @@ if st.session_state.current_store != store_choice:
 
 st.markdown("---")
 
-# --- 側邊欄 ---
 with st.sidebar:
     st.title("☕ 門市管理系統")
     page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
@@ -506,17 +502,14 @@ if page == "📊 每日營運報表":
     today_event = get_event_info(today)
     today_str = today.strftime('%m/%d')
     
-    # 產生訂貨提醒 (依據波段 Spring1/2/3, Summer1_主打/Phase2)
     active_waves_list = []
     for wave in NEW_PRODUCT_WAVES:
         try:
             order_dt = datetime.datetime.strptime(wave["order_date"], "%Y-%m-%d").date()
             launch_dt = datetime.datetime.strptime(wave["launch_date"], "%Y-%m-%d").date()
             
-            # 計算距離訂貨日的天數 (今天 - 訂貨日)
             days_diff = (order_dt - today).days
             
-            # 條件：今天在 [訂貨日前7天] 到 [訂貨日當天] 之間
             if 0 <= days_diff <= 7:
                 o_str = order_dt.strftime('%m/%d')
                 l_str = launch_dt.strftime('%m/%d')
@@ -526,7 +519,6 @@ if page == "📊 每日營運報表":
 
     st.title(f"☕ 2026 {store_choice}營運報表")
     
-    # 大看板顯示
     st.markdown(f"""
     <div class="activity-box">
         <div class="activity-title">📢 門市活動快訊 (Today: {today_str})</div>
@@ -559,7 +551,7 @@ if page == "📊 每日營運報表":
             column_config={
                 "顯示日期": st.column_config.TextColumn("日期", disabled=True, width="small"),
                 "日期": None,
-                "目標PSD": st.column_config.NumberColumn("目標", format="$%d"),
+                "目標PSD": st.column_config.NumberColumn("每日目標", format="$%d"),
                 "實績PSD": st.column_config.NumberColumn("實績", format="$%d"),
                 "PSD達成率": st.column_config.NumberColumn("達成%", disabled=True, format="%.1f%%"),
                 "ADT": st.column_config.NumberColumn("來客", format="%d"),
@@ -615,7 +607,6 @@ if page == "📊 每日營運報表":
         )
 
     if st.button("💾 確認更新 (並自動計算)", type="primary"):
-        # 1. Update KPI
         for i, row in edited_kpi.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -630,21 +621,18 @@ if page == "📊 每日營運報表":
                 cust = float(row["ADT"]) if row["ADT"] > 0 else 1.0
                 df.loc[mask, "AT"] = int(round(actual_psd / cust, 0)) if row["ADT"] > 0 else 0
 
-        # 2. Update Prod
         for i, row in edited_prod.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
             for c in cols: df.loc[mask, c] = row[c]
             
-        # 3. Update Delivery
         for i, row in edited_delivery.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['foodpanda', 'foodomo', 'MOP']
             for c in cols: df.loc[mask, c] = row[c]
 
-        # 4. Update Labor
         for i, row in edited_labor.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
@@ -652,7 +640,6 @@ if page == "📊 每日營運報表":
                 df.loc[mask, "日工時"] = row["日工時"]
                 df.loc[mask, "IPLH"] = row["IPLH"]
                 
-                # 自動計算貢獻度
                 current_psd = df.loc[mask, "實績PSD"].values[0]
                 labor_hours = float(row["日工時"])
                 contribution = int(current_psd / labor_hours) if labor_hours > 0 else 0
@@ -684,18 +671,24 @@ if page == "📊 每日營運報表":
                 sel_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
                 target_df = current_month_df[current_month_df["Week_Num"] == week_options[sel_label]]
 
-    # 計算 Dashboard 數據
+    # [更新] 計算 Dashboard 數據
     valid_df = target_df[target_df["實績PSD"] > 0]
     days_count = max(valid_df.shape[0], 1)
     
     total_sales = target_df["實績PSD"].sum()
-    total_target = target_df["目標PSD"].sum()
+    
+    # 判斷目標來源：若為全月累計則抓取字典中的整月目標，單週分析則抓每日目標加總
+    if view_mode == "全月累計":
+        total_target = MONTHLY_TARGETS[store_choice].get(selected_month, 0)
+    else:
+        total_target = target_df["目標PSD"].sum()
+        
     achieve_rate = (total_sales / total_target * 100) if total_target > 0 else 0
+    
     avg_adt = valid_df["ADT"].mean() if not valid_df.empty else 0
     total_adt = target_df["ADT"].sum()
     avg_at = total_sales / total_adt if total_adt > 0 else 0
 
-    # 計算效率與外送指標 (全部轉為 PSD)
     total_labor = target_df["日工時"].sum()
     avg_contrib = (total_sales / total_labor) if total_labor > 0 else 0
     
@@ -711,7 +704,8 @@ if page == "📊 每日營運報表":
     st.markdown("##### 🏆 核心績效看板")
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("累積 SALES", f"${total_sales:,.0f}")
-    m2.metric("達成率", f"{achieve_rate:.1f}%", delta=f"${total_sales - total_target:,.0f}")
+    # 達成率下方的 delta 會自動顯示與目標的差額
+    m2.metric("達成率 (依選定區間)", f"{achieve_rate:.1f}%", delta=f"${total_sales - total_target:,.0f}")
     m3.metric("平均 PSD", f"${total_sales/days_count:,.0f}")
     m4.metric("平均 ADT", f"{avg_adt:,.0f}")
     m5.metric("平均 AT", f"${avg_at:,.0f}")
@@ -737,8 +731,7 @@ if page == "📊 每日營運報表":
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        # [動態更新] AI Prompt 會自動帶入住目前的門市名稱
-        ai_prompt = f"""我是星巴克{store_choice}的店經理，請協助分析數據。\n【分析區間】：{period_str}\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
+        ai_prompt = f"""我是星巴克{store_choice}的店經理，請協助分析數據。\n【分析區間】：{period_str} (總目標：{total_target})\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
         
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
         if not detail_data.empty:
@@ -760,7 +753,7 @@ if page == "📊 每日營運報表":
                 if not evt_name: evt_name = "無"
                 
                 line_str = (
-                    f"{d_str}: 業績${sales:,.0f} /達成{rate:.1f}%/ 來客{row['ADT']} | "
+                    f"{d_str}: 業績${sales:,.0f} /每日目標達成{rate:.1f}%/ 來客{row['ADT']} | "
                     f"客單${row['AT']} /糕點PSD${row['糕點PSD']:,.0f}/USD{row['糕點USD']}/"
                     f"報廢{row['糕點報廢USD']}/Retail${row['Retail']:,.0f}/"
                     f"NCB{row['NCB']}/BAF{row['BAF']}/節慶${row['節慶USD']} | "
@@ -780,22 +773,18 @@ if page == "📊 每日營運報表":
 # ==========================================
 elif page == "🎁 節慶禮盒控管":
     st.title(f"🎁 {store_choice} | 節慶禮盒庫存控管")
-    st.caption("同步對應門市的 Google Sheet。進度條顯示：紅色=庫存緊張 (賣很好)，綠色=庫存充足。")
+    st.caption("進度條顯示：紅色=庫存緊張 (賣很好)，綠色=庫存充足。")
     
-    # 讀取完整資料
     full_gift_df = load_gift_data(current_sheet)
     
-    # [新增] 檔期篩選功能
     season_options = ["全部", "母親節", "端午節", "父親節", "中秋節", "CNY", "其他"]
     selected_season = st.selectbox("📅 選擇顯示檔期", season_options, index=0)
     
-    # 根據選擇篩選要顯示的資料
     if selected_season == "全部":
         display_df = full_gift_df.copy()
     else:
         display_df = full_gift_df[full_gift_df['檔期'] == selected_season].copy()
     
-    # 統計數據 (只計算篩選後的資料)
     if not display_df.empty:
         total_qty = display_df["原始控量"].sum()
         remain_qty = display_df["剩餘控量"].sum()
@@ -809,7 +798,6 @@ elif page == "🎁 節慶禮盒控管":
         c4.metric("銷售進度", f"{sell_rate:.1f}%")
         st.markdown("---")
 
-    # 編輯區 (顯示篩選後的資料)
     edited_display_df = st.data_editor(
         display_df,
         column_config={
@@ -830,14 +818,11 @@ elif page == "🎁 節慶禮盒控管":
         key="gift_editor"
     )
     
-    # [更新] 儲存邏輯：將編輯後的資料與隱藏的資料合併後再存檔
     if st.button("💾 儲存禮盒變更", type="primary"):
         if selected_season == "全部":
             final_save_df = edited_display_df
         else:
-            # 抓出原本資料中「不是」當前檔期的資料 (保留它們)
             other_season_df = full_gift_df[full_gift_df['檔期'] != selected_season]
-            # 將保留的資料與剛剛編輯完的資料合併
             final_save_df = pd.concat([other_season_df, edited_display_df], ignore_index=True)
             
         save_gift_data(current_sheet, final_save_df)
@@ -852,7 +837,6 @@ elif page == "👥 夥伴休假管理":
     
     leave_df = load_leave_data(current_sheet)
     
-    # 自動偵測到期預警邏輯
     tw_tz = datetime.timezone(datetime.timedelta(hours=8))
     today_date = datetime.datetime.now(tw_tz).date()
     
@@ -862,7 +846,6 @@ elif page == "👥 夥伴休假管理":
         for idx, row in leave_df.iterrows():
             name = row['夥伴姓名']
             
-            # 1. 檢查一般特代休
             period_str = str(row['假別週期'])
             end_date = parse_end_date(period_str)
             if end_date:
@@ -871,7 +854,6 @@ elif page == "👥 夥伴休假管理":
                 if 0 <= days_left <= 90 and total_hours > 0:
                     alert_messages.append(f"⚠️ {name} 的特代休 ({period_str}) 即將於 {end_date} 到期！剩餘 {total_hours} 小時未休。")
             
-            # 2. 檢查特殊假
             sp_period_str = str(row['特殊假_週期'])
             sp_end_date = parse_end_date(sp_period_str)
             if sp_end_date:
@@ -890,7 +872,6 @@ elif page == "👥 夥伴休假管理":
         
     st.markdown("---")
 
-    # 編輯區
     edited_leave_df = st.data_editor(
         leave_df,
         column_config={
@@ -912,12 +893,6 @@ elif page == "👥 夥伴休假管理":
     if st.button("💾 儲存休假資料", type="primary"):
         save_leave_data(current_sheet, edited_leave_df)
         st.rerun()
-
-    st.markdown("### 💡 管理提醒")
-    st.markdown("""
-    * **到期日自動偵測**：系統會自動抓取「週期」欄位中 **`~`** 符號後面的日期（格式需為 8 碼數字，如 `20260401`）。
-    * **預警規則**：當距離到期日 **< 90 天** 且 **剩餘時數 > 0** 時，上方會出現紅色警示。
-    """)
 
 # ==========================================
 # 頁面 4: 新品查詢與訂貨
