@@ -68,15 +68,22 @@ HOLIDAYS_2026 = {
     "2026-06-19": "🔴 端午節", "2026-09-25": "🔴 中秋節", "2026-10-10": "🔴 國慶日",
 }
 
-# [新增] 2026 每月門市業績總目標
-MONTHLY_TARGETS = {
+# [更新] 2026 各月份天數
+DAYS_IN_MONTH_2026 = {
+    1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
+    7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31
+}
+
+# [更新] 2026 每月門市 "每日業績目標 (PSD)"
+# ⚠️ 請將以下 2 月到 12 月的數字，替換為您圖片上實際的 PSD 數字！
+TARGET_PSD_2026 = {
     "礁溪門市": {
-        1: 2750000, 2: 2500000, 3: 2150000, 4: 2400000, 5: 2600000, 6: 2600000,
-        7: 2850000, 8: 3000000, 9: 2500000, 10: 2600000, 11: 2450000, 12: 2600000
+        1: 88387, 2: 94779, 3: 83654, 4: 77226, 5: 79163, 6: 77624,
+        7: 76829, 8: 91807, 9: 81530, 10: 81430, 11: 81464, 12: 89371
     },
     "羅東門市": {
-        1: 2650000, 2: 2550000, 3: 2400000, 4: 2500000, 5: 2750000, 6: 2750000,
-        7: 3000000, 8: 2900000, 9: 2650000, 10: 2800000, 11: 2650000, 12: 2700000
+        1: 139904, 2: 137300, 3: 119645, 4: 114673, 5: 121376, 6: 121275,
+        7: 116850, 8: 126152, 9: 136179, 10: 127084, 11: 127580, 12: 132402
     }
 }
 
@@ -160,7 +167,7 @@ MARKETING_CALENDAR = {
     "2026-03-17": "🐼 FP好友分享 | 🐼 FP第二杯半價",
     "2026-03-18": "🎫 金星好友分享 | 🛵 FDM好友分享 | 🐼 FP第二杯半價",
     "2026-03-19": "🎫 金星好友分享 | 🛵 FDM好友分享",
-    "2026-03-20": "🛍️ 28週年購物派驚(85折) | 🎫 金星好友分享 | 🛵 FDM好友分享",
+    "2026-03-20": "🛍️ 28週年購物派對(85折) | 🎫 金星好友分享 | 🛵 FDM好友分享",
     "2026-03-21": "⭐ 週末星夜Bonus Star | 🐼 FP第二杯半價",
     "2026-03-22": "⭐ 週末星夜Bonus Star | 🐼 FP第二杯半價",
     "2026-03-23": "☕ 星享成雙BAF",
@@ -671,15 +678,16 @@ if page == "📊 每日營運報表":
                 sel_label = st.selectbox("選擇週次", list(week_options.keys()), index=len(week_options)-1)
                 target_df = current_month_df[current_month_df["Week_Num"] == week_options[sel_label]]
 
-    # [更新] 計算 Dashboard 數據
     valid_df = target_df[target_df["實績PSD"] > 0]
     days_count = max(valid_df.shape[0], 1)
     
     total_sales = target_df["實績PSD"].sum()
     
-    # 判斷目標來源：若為全月累計則抓取字典中的整月目標，單週分析則抓每日目標加總
+    # [更新] 動態獲取目標業績 (當月 PSD * 當月天數)
     if view_mode == "全月累計":
-        total_target = MONTHLY_TARGETS[store_choice].get(selected_month, 0)
+        daily_psd = TARGET_PSD_2026[store_choice].get(selected_month, 0)
+        days_in_month = DAYS_IN_MONTH_2026.get(selected_month, 30)
+        total_target = daily_psd * days_in_month
     else:
         total_target = target_df["目標PSD"].sum()
         
@@ -704,7 +712,6 @@ if page == "📊 每日營運報表":
     st.markdown("##### 🏆 核心績效看板")
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("累積 SALES", f"${total_sales:,.0f}")
-    # 達成率下方的 delta 會自動顯示與目標的差額
     m2.metric("達成率 (依選定區間)", f"{achieve_rate:.1f}%", delta=f"${total_sales - total_target:,.0f}")
     m3.metric("平均 PSD", f"${total_sales/days_count:,.0f}")
     m4.metric("平均 ADT", f"{avg_adt:,.0f}")
@@ -731,7 +738,7 @@ if page == "📊 每日營運報表":
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        ai_prompt = f"""我是星巴克{store_choice}的店經理，請協助分析數據。\n【分析區間】：{period_str} (總目標：{total_target})\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
+        ai_prompt = f"""我是星巴克{store_choice}的店經理，請協助分析數據。\n【分析區間】：{period_str} (總目標：{total_target:,})\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
         
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
         if not detail_data.empty:
@@ -893,6 +900,12 @@ elif page == "👥 夥伴休假管理":
     if st.button("💾 儲存休假資料", type="primary"):
         save_leave_data(current_sheet, edited_leave_df)
         st.rerun()
+
+    st.markdown("### 💡 管理提醒")
+    st.markdown("""
+    * **到期日自動偵測**：系統會自動抓取「週期」欄位中 **`~`** 符號後面的日期（格式需為 8 碼數字，如 `20260401`）。
+    * **預警規則**：當距離到期日 **< 90 天** 且 **剩餘時數 > 0** 時，上方會出現紅色警示。
+    """)
 
 # ==========================================
 # 頁面 4: 新品查詢與訂貨
