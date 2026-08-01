@@ -6,7 +6,7 @@ import datetime
 import re
 
 # --- 1. 設定網頁與樣式 ---
-st.set_page_config(page_title="星巴克門市 | 整合管理系統", page_icon="☕", layout="wide")
+st.set_page_config(page_title="星巴克 羅東林場門市 | 整合管理系統", page_icon="☕", layout="wide")
 
 st.markdown("""
 <style>
@@ -56,6 +56,16 @@ st.markdown("""
         color: #b71c1c;
         margin-bottom: 15px;
     }
+    .marquee-container {
+        background-color: #fff3cd;
+        color: #856404;
+        padding: 10px;
+        border: 1px solid #ffeeba;
+        border-radius: 5px;
+        margin-bottom: 15px;
+        font-weight: bold;
+        font-size: 1.1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -68,23 +78,15 @@ HOLIDAYS_2026 = {
     "2026-06-19": "🔴 端午節", "2026-09-25": "🔴 中秋節", "2026-10-10": "🔴 國慶日",
 }
 
-# [更新] 2026 各月份天數
 DAYS_IN_MONTH_2026 = {
     1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
     7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31
 }
 
-# [更新] 2026 每月門市 "每日業績目標 (PSD)"
-# ⚠️ 請將以下 2 月到 12 月的數字，替換為您圖片上實際的 PSD 數字！
+# 羅東林場門市 每日業績目標 (PSD)
 TARGET_PSD_2026 = {
-    "礁溪門市": {
-        1: 88387, 2: 94779, 3: 83654, 4: 77226, 5: 79163, 6: 77624,
-        7: 76829, 8: 91807, 9: 81530, 10: 81430, 11: 81464, 12: 89371
-    },
-    "羅東門市": {
-        1: 139904, 2: 137300, 3: 119645, 4: 114673, 5: 121376, 6: 121275,
-        7: 116850, 8: 126152, 9: 136179, 10: 127084, 11: 127580, 12: 132402
-    }
+    1: 139904, 2: 137300, 3: 119645, 4: 114673, 5: 121376, 6: 121275,
+    7: 116850, 8: 126152, 9: 136179, 10: 127084, 11: 127580, 12: 132402
 }
 
 NEW_PRODUCT_WAVES = [
@@ -96,90 +98,12 @@ NEW_PRODUCT_WAVES = [
 ]
 
 MARKETING_CALENDAR = {
-    "2026-01-01": "🎁 買飲料券送紅包袋開始",
-    "2026-01-02": "☕ 新年好友分享日(BAF)",
-    "2026-01-03": "⭐ 週末好星情(滿800贈8星)",
-    "2026-01-04": "⭐ 週末好星情(滿800贈8星)",
-    "2026-01-07": "🎫 金星好友分享(券)",
-    "2026-01-08": "🎫 金星好友分享(券)",
-    "2026-01-09": "🎫 金星好友分享(券)",
-    "2026-01-10": "⭐ 週末好星情(滿800贈8星)",
-    "2026-01-11": "⭐ 週末好星情(滿800贈8星)",
-    "2026-01-12": "☕ 指定飲料好友分享",
-    "2026-01-13": "🌟 金星雙倍贈星 | ☕ 指定BAF",
-    "2026-01-14": "🧸 夾娃娃機加購開賣",
-    "2026-01-15": "🐼 外送考生應援BAF",
-    "2026-01-16": "☕ 學測應援BAF | ⭐ 滿888贈8星",
-    "2026-01-17": "⭐ 滿888贈8星",
-    "2026-01-18": "⭐ 滿888贈8星",
-    "2026-01-19": "⭐ 滿888贈8星",
-    "2026-01-20": "☕ 擁抱溫暖BAF | ⭐ 滿888贈8星",
-    "2026-01-21": "☕ 擁抱溫暖BAF | ⭐ 喜迎新年(滿千贈15星)",
-    "2026-01-22": "⭐ 喜迎新年(滿千贈15星)",
-    "2026-01-23": "⭐ 喜迎新年(滿千贈15星)",
-    "2026-01-24": "⭐ 週末好星情(滿800贈8星)",
-    "2026-01-25": "⭐ 週末好星情(滿800贈8星)",
-    "2026-01-26": "☕ 星享成雙BAF(買二送二)",
-    "2026-01-27": "☕ 星享成雙BAF(買二送二)",
-    "2026-01-28": "☕ 星享成雙BAF(買二送二)",
-    "2026-01-29": "🍰 歡樂食光(飲+糕贈8星)",
-    "2026-01-30": "🍰 歡樂食光(飲+糕贈8星)",
-    "2026-01-31": "⭐ 週末好星情 | 🎫 好友分享券兌換開始",
-    "2026-02-01": "⭐ 週末好星情(滿800贈8星)",
-    "2026-02-02": "☕ 尾牙BAF",
-    "2026-02-03": "☕ 尾牙BAF",
-    "2026-02-04": "🌟 金星雙倍贈星",
-    "2026-02-09": "⭐ 星飲搶鮮(新品會員搶先喝)",
-    "2026-02-10": "⭐ 星飲搶鮮 | 🐼 FP好友分享(大杯那/美)",
-    "2026-02-11": "🐼 FP第二杯半價/三杯組 | 🛵 FDM新春雙杯組",
-    "2026-02-12": "☕ 情人節快樂BAF | 🐼 FP第二杯半價",
-    "2026-02-13": "☕ 情人節快樂BAF | 🛵 FDM滿$588贈66點",
-    "2026-02-14": "⭐ 馬歲喜臨門(滿$380贈卡) | 🛵 FDM滿額贈點",
-    "2026-02-15": "⭐ 馬歲喜臨門(滿額贈接喜卡) | 🛵 FDM滿額贈點",
-    "2026-02-16": "⭐ 馬歲喜臨門(滿額贈接喜卡) | 🛵 FDM滿額贈點",
-    "2026-02-17": "⭐ 馬歲喜臨門(滿額贈接喜卡) | 🛵 FDM滿額贈點",
-    "2026-02-18": "⭐ 馬歲喜臨門(滿額贈接喜卡) | 🛵 FDM滿額贈點",
-    "2026-02-19": "⭐ 馬歲喜臨門(滿額贈接喜卡) | 🛵 FDM滿額贈點",
-    "2026-02-20": "⭐ 馬歲喜臨門(滿額贈接喜卡) | 🐼 FP第二杯半價",
-    "2026-02-21": "⭐ 馬歲喜臨門(滿額贈接喜卡) | 🐼 FP第二杯半價",
-    "2026-02-22": "⭐ 馬歲喜臨門(滿額贈接喜卡) | 🐼 FP第二杯半價",
-    "2026-02-23": "☕ 開工大吉BAF(開店-20:00) | ⭐ OP點數10倍(糕點)",
-    "2026-02-24": "🐼 FP好友分享/第二杯半價 | ⭐ OP點數10倍",
-    "2026-02-25": "🛵 FDM好友分享(週三~五) | 🛵 FDM星耀新年",
-    "2026-02-26": "☕ 迎接連假BAF | 🛵 FDM好友分享",
-    "2026-02-27": "🛵 FDM好友分享 | 🐼 FP第二杯半價",
-    "2026-02-28": "🐼 FP第二杯半價 | 🛵 FDM星耀新年",
-    "2026-03-01": "⭐ 循環杯租借贈星開始 | 🐼 FP第二杯半價",
-    "2026-03-02": "⭐ 早安好星情(11點前) | 🐼 FP第二杯半價",
-    "2026-03-03": "🐼 FP好友分享 | ⭐ 早安好星情 (⚠️ 門市BAF已取消)",
-    "2026-03-04": "🛵 FDM好友分享 | ⭐ 早安好星情",
-    "2026-03-05": "☕ 一起集氣BAF | 🛵 FDM好友分享",
-    "2026-03-06": "🛍️ 28週年購物派對(85折) | 🛵 FDM好友分享",
-    "2026-03-07": "⭐ 棒棒贏星 | ⭐ 週末星夜Bonus Star",
-    "2026-03-08": "⭐ 棒棒贏星 | ⭐ 週末星夜Bonus Star",
-    "2026-03-09": "☕ 感謝英雄BAF | ⭐ 棒棒贏星",
-    "2026-03-10": "🐼 FP好友分享 | ⭐ 棒棒贏星",
-    "2026-03-11": "🛵 FDM好友分享 | ⭐ OP點數10倍(大杯飲) | 🐼 FP第二杯半價",
-    "2026-03-12": "🛵 FDM好友分享 | ⭐ OP點數10倍(大杯飲)",
-    "2026-03-13": "☕ 白色情人節BAF | 🛵 FDM好友分享",
-    "2026-03-14": "⭐ 棒棒贏星 | ⭐ 週末星夜Bonus Star",
-    "2026-03-15": "⭐ 棒棒贏星 | ⭐ 週末星夜Bonus Star",
-    "2026-03-17": "🐼 FP好友分享 | 🐼 FP第二杯半價",
-    "2026-03-18": "🎫 金星好友分享 | 🛵 FDM好友分享 | 🐼 FP第二杯半價",
-    "2026-03-19": "🎫 金星好友分享 | 🛵 FDM好友分享",
-    "2026-03-20": "🛍️ 28週年購物派對(85折) | 🎫 金星好友分享 | 🛵 FDM好友分享",
-    "2026-03-21": "⭐ 週末星夜Bonus Star | 🐼 FP第二杯半價",
-    "2026-03-22": "⭐ 週末星夜Bonus Star | 🐼 FP第二杯半價",
-    "2026-03-23": "☕ 星享成雙BAF",
-    "2026-03-24": "☕ 星享成雙BAF | 🐼 FP好友分享",
-    "2026-03-25": "🛵 FDM好友分享 | ⭐ 金星會員星運抽",
     "2026-03-26": "🌟 金星雙倍贈星 | 🛵 FDM好友分享",
     "2026-03-27": "☕ 28週年慶好友分享日 | 🛵 FDM好友分享",
     "2026-03-28": "⭐ 週末星夜Bonus Star | 🐼 FP第二杯半價",
     "2026-03-29": "⭐ 週末星夜Bonus Star | 🐼 FP第二杯半價",
     "2026-03-30": "🐼 FP第二杯半價 | 🛵 FDM星光同慶",
     "2026-03-31": "🐼 FP好友分享 | 🛵 FDM滿額贈OP點",
-    
     "2026-04-01": "⭐ 循環杯贈星 | 🐼 糕點/飲料加價購 | 🐼 第二杯半價 | 🛵 星願滿滿雙杯",
     "2026-04-02": "🎫 金星好友分享 | ⭐ 循環杯贈星 | 🐼 第二杯半價 | 🛵 星願滿滿雙杯",
     "2026-04-03": "⭐ 循環杯贈星 | 🐼 第二杯半價 | 🛵 星暖初夏好友分享",
@@ -296,7 +220,7 @@ def get_main_sheet(sheet_name):
 
 def initialize_sheet(sheet):
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
-    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '備註']
+    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '備註']
     df = pd.DataFrame(columns=cols)
     df['日期'] = date_range.astype(str)
     df = df.fillna(0)
@@ -316,7 +240,7 @@ def load_data(sheet_name):
         if '日期' not in df.columns: return initialize_sheet(sheet)
         
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
-        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH']
+        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH']
         for col in numeric_cols:
             if col in df.columns: 
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -336,7 +260,7 @@ def load_data(sheet_name):
 def save_data_to_sheet(sheet_name, df):
     try:
         sheet = get_main_sheet(sheet_name)
-        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '備註']
+        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '備註']
         for col in save_cols:
             if col not in df.columns: df[col] = 0 if col != '備註' else ""
 
@@ -453,6 +377,55 @@ def load_product_data(sheet_name):
     except Exception as e:
         return pd.DataFrame(columns=['檔期', '分類', '品號', '品名', '售價', '訂貨日', '上市日', '備註'])
 
+# --- 3.5 門市特色商品 (Sheet 5) ---
+def get_special_product_sheet(sheet_name):
+    workbook = get_workbook(sheet_name)
+    try: return workbook.worksheet("工作表5")
+    except:
+        try: return workbook.add_worksheet(title="工作表5", rows=100, cols=4)
+        except Exception as e:
+            st.error(f"建立工作表5失敗: {e}")
+            return None
+
+@st.cache_data(ttl=60)
+def load_special_product_data(sheet_name):
+    try:
+        sheet = get_special_product_sheet(sheet_name)
+        data = sheet.get_all_records()
+        cols = ['品項', '原始控量', '剩餘控量']
+        
+        if not data:
+            # 預設載入特色商品清單
+            df = pd.DataFrame([
+                {'品項': '三星蔥寶寶', '原始控量': 0, '剩餘控量': 0},
+                {'品項': '竹筍寶寶', '原始控量': 0, '剩餘控量': 0},
+                {'品項': '車掌造型娃包', '原始控量': 0, '剩餘控量': 0},
+                {'品項': '車長冷水壺', '原始控量': 0, '剩餘控量': 0},
+                {'品項': '木紋不鏽鋼杯', '原始控量': 0, '剩餘控量': 0},
+            ])
+        else:
+            df = pd.DataFrame(data)
+            for c in cols:
+                if c not in df.columns: df[c] = 0 if '量' in c else ""
+                
+        df['原始控量'] = pd.to_numeric(df['原始控量'], errors='coerce').fillna(0).astype(int)
+        df['剩餘控量'] = pd.to_numeric(df['剩餘控量'], errors='coerce').fillna(0).astype(int)
+        df['銷售進度'] = df.apply(lambda x: ((x['原始控量'] - x['剩餘控量']) / x['原始控量'] * 100) if x['原始控量'] > 0 else 0, axis=1)
+        return df
+    except Exception as e:
+        return pd.DataFrame(columns=['品項', '原始控量', '剩餘控量', '銷售進度'])
+
+def save_special_product_data(sheet_name, df):
+    try:
+        sheet = get_special_product_sheet(sheet_name)
+        save_df = df[['品項', '原始控量', '剩餘控量']].fillna(0)
+        sheet.clear()
+        sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
+        st.toast("✅ 特色商品庫存已更新！", icon="🛍️")
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"特色商品儲存失敗: {e}")
+
 def parse_end_date(period_str):
     try:
         match = re.search(r'~(\d{8})', str(period_str))
@@ -463,36 +436,17 @@ def parse_end_date(period_str):
         return None
     return None
 
-
 # ==========================================
 # 4. 主程式 UI 佈局
 # ==========================================
 
-col_store, col_empty = st.columns([1, 3])
-with col_store:
-    store_choice = st.selectbox("🏠 選擇管理門市", ["礁溪門市", "羅東門市"])
-
-sheet_mapping = {
-    "礁溪門市": "Jiaoxi_2026_Data",
-    "羅東門市": "Luodong_2026_Data"
-}
-current_sheet = sheet_mapping[store_choice]
-
-if "current_store" not in st.session_state:
-    st.session_state.current_store = store_choice
-
-if st.session_state.current_store != store_choice:
-    st.session_state.current_store = store_choice
-    st.cache_data.clear() 
-    if "df" in st.session_state:
-        del st.session_state["df"]
-    st.rerun()
-
-st.markdown("---")
+# 單一門市設定
+store_choice = "羅東林場門市"
+current_sheet = "Luodong_Linchang_2026_Data"
 
 with st.sidebar:
-    st.title("☕ 門市管理系統")
-    page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
+    st.title("☕ 羅東林場門市系統")
+    page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "🛍️ 門市特色商品", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
     st.markdown("---")
     if st.button("🔄 重新讀取資料"):
         st.cache_data.clear()
@@ -571,7 +525,7 @@ if page == "📊 每日營運報表":
 
     with tab2:
         edited_prod = st.data_editor(
-            current_month_df[['顯示日期', '日期', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']],
+            current_month_df[['顯示日期', '日期', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD']],
             column_config={
                 "顯示日期": st.column_config.TextColumn("日期", disabled=True, width="small"),
                 "日期": None,
@@ -579,7 +533,8 @@ if page == "📊 每日營運報表":
                 "糕點USD": st.column_config.NumberColumn("糕點銷量", format="%d"),
                 "糕點報廢USD": st.column_config.NumberColumn("報廢(個)", format="%d"),
                 "Retail": st.column_config.NumberColumn("Retail", format="$%d"),
-                "NCB": st.column_config.NumberColumn("NCB", format="%d"),
+                "CB": st.column_config.NumberColumn("CB", format="%d"),
+                "現烤": st.column_config.NumberColumn("現烤", format="$%d"),
                 "BAF": st.column_config.NumberColumn("BAF", format="%d"),
                 "節慶USD": st.column_config.NumberColumn("節慶", format="%d"),
             },
@@ -631,7 +586,7 @@ if page == "📊 每日營運報表":
         for i, row in edited_prod.iterrows():
             row_date = row["日期"]
             mask = df["日期"] == row_date
-            cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'NCB', 'BAF', '節慶USD']
+            cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD']
             for c in cols: df.loc[mask, c] = row[c]
             
         for i, row in edited_delivery.iterrows():
@@ -683,9 +638,8 @@ if page == "📊 每日營運報表":
     
     total_sales = target_df["實績PSD"].sum()
     
-    # [更新] 動態獲取目標業績 (當月 PSD * 當月天數)
     if view_mode == "全月累計":
-        daily_psd = TARGET_PSD_2026[store_choice].get(selected_month, 0)
+        daily_psd = TARGET_PSD_2026.get(selected_month, 0)
         days_in_month = DAYS_IN_MONTH_2026.get(selected_month, 30)
         total_target = daily_psd * days_in_month
     else:
@@ -726,19 +680,20 @@ if page == "📊 每日營運報表":
     d5.metric("MOP PSD", f"${avg_mop:,.0f}")
 
     st.markdown("##### ⚡ 關鍵指標 (日平均)")
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     if not valid_df.empty:
         k1.metric("糕點 PSD", f"${valid_df['糕點PSD'].mean():,.0f}")
         k2.metric("糕點 USD", f"{valid_df['糕點USD'].mean():.1f} 個")
         k3.metric("糕點報廢", f"{valid_df['糕點報廢USD'].mean():.1f} 個", delta_color="inverse")
-        k4.metric("NCB 杯數", f"{valid_df['NCB'].mean():.1f}")
-        k5.metric("Retail", f"${valid_df['Retail'].mean():,.0f}")
+        k4.metric("CB 杯數", f"{valid_df['CB'].mean():.1f}")
+        k5.metric("現烤", f"${valid_df['現烤'].mean():,.0f}")
+        k6.metric("Retail", f"${valid_df['Retail'].mean():,.0f}")
 
     st.markdown("---")
     st.subheader("🤖 呼叫 AI 營運顧問")
     with st.expander("點擊展開：取得 AI 深度分析指令 (含行銷活動)", expanded=False):
         period_str = f"2026年 {selected_month}月 ({view_mode})"
-        ai_prompt = f"""我是星巴克{store_choice}的店經理，請協助分析數據。\n【分析區間】：{period_str} (總目標：{total_target:,})\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/NCB/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
+        ai_prompt = f"""我是星巴克{store_choice}的店經理，請協助分析數據。\n【分析區間】：{period_str} (總目標：{total_target:,})\n\n【詳細數據】：\n(格式：日期: 業績 /達成率/ 來客 | 客單 /糕點PSD/USD/報廢/Retail/CB/現烤/BAF/節慶 | 效率:工時/貢獻/IPLH | 外送:熊貓/FDM/MOP, 活動：名稱)\n"""
         
         detail_data = target_df[target_df["實績PSD"] > 0].sort_values("日期")
         if not detail_data.empty:
@@ -763,7 +718,7 @@ if page == "📊 每日營運報表":
                     f"{d_str}: 業績${sales:,.0f} /每日目標達成{rate:.1f}%/ 來客{row['ADT']} | "
                     f"客單${row['AT']} /糕點PSD${row['糕點PSD']:,.0f}/USD{row['糕點USD']}/"
                     f"報廢{row['糕點報廢USD']}/Retail${row['Retail']:,.0f}/"
-                    f"NCB{row['NCB']}/BAF{row['BAF']}/節慶${row['節慶USD']} | "
+                    f"CB{row['CB']}/現烤${row['現烤']:,.0f}/BAF{row['BAF']}/節慶${row['節慶USD']} | "
                     f"效率:工時{labor_h:.1f}hr/貢獻${contrib}/IPLH{iplh:.1f} | "
                     f"外送:熊貓${panda}/FDM${fdm}/MOP${mop}, "
                     f"活動：{evt_name}"
@@ -833,6 +788,51 @@ elif page == "🎁 節慶禮盒控管":
             final_save_df = pd.concat([other_season_df, edited_display_df], ignore_index=True)
             
         save_gift_data(current_sheet, final_save_df)
+        st.rerun()
+
+# ==========================================
+# 頁面: 門市特色商品
+# ==========================================
+elif page == "🛍️ 門市特色商品":
+    st.title(f"🛍️ {store_choice} | 門市特色商品管理")
+    st.caption("管理羅東林場獨有的特色商品庫存與銷售進度。")
+
+    special_df = load_special_product_data(current_sheet)
+    
+    if not special_df.empty:
+        total_qty = special_df["原始控量"].sum()
+        remain_qty = special_df["剩餘控量"].sum()
+        sold_qty = total_qty - remain_qty
+        sell_rate = (sold_qty / total_qty * 100) if total_qty > 0 else 0
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("特色商品總量", f"{total_qty} 件")
+        c2.metric("已銷售", f"{sold_qty} 件")
+        c3.metric("庫存剩餘", f"{remain_qty} 件")
+        c4.metric("銷售進度", f"{sell_rate:.1f}%")
+        st.markdown("---")
+
+    edited_special_df = st.data_editor(
+        special_df,
+        column_config={
+            "品項": st.column_config.TextColumn("特色商品名稱", required=True, width="medium"),
+            "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
+            "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
+            "銷售進度": st.column_config.ProgressColumn(
+                "銷售進度", 
+                help="已銷售百分比", 
+                format="%.1f%%",
+                min_value=0, 
+                max_value=100
+            ),
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        key="special_product_editor"
+    )
+
+    if st.button("💾 儲存特色商品變更", type="primary"):
+        save_special_product_data(current_sheet, edited_special_df)
         st.rerun()
 
 # ==========================================
