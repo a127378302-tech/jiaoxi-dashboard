@@ -83,7 +83,6 @@ DAYS_IN_MONTH_2026 = {
     7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31
 }
 
-# 羅東林場門市 每日業績目標 (PSD)
 TARGET_PSD_2026 = {
     1: 139904, 2: 137300, 3: 119645, 4: 114673, 5: 121376, 6: 121275,
     7: 116850, 8: 126152, 9: 136179, 10: 127084, 11: 127580, 12: 132402
@@ -209,7 +208,7 @@ def get_workbook(sheet_name):
         return client.open(sheet_name)
     except gspread.exceptions.SpreadsheetNotFound:
         st.error(f"❌ **嚴重錯誤：找不到 Google 試算表「{sheet_name}」**")
-        st.warning("👉 **請確認以下 2 點：**\n\n1. 您的 Google Drive 中確實有這個檔名的試算表。\n2. **(最常見)** 您是否已點擊試算表右上角的「共用」，將您的 GCP 服務帳號 Email 加入並設為「編輯者」？")
+        st.warning("👉 **請確認以下 2 點：**\n\n1. 您的 Google Drive 中確實有這個檔名的試算表。\n2. 您是否已點擊試算表右上角的「共用」，將您的 GCP 服務帳號 Email 加入並設為「編輯者」？")
         st.stop()
     except Exception as e:
         st.error(f"❌ 連線到試算表時發生未知錯誤: {e}")
@@ -221,7 +220,8 @@ def get_main_sheet(sheet_name):
 
 def initialize_sheet(sheet):
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
-    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '備註']
+    # [更新] 新增特色商品 5 欄位
+    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯', '備註']
     df = pd.DataFrame(columns=cols)
     df['日期'] = date_range.astype(str)
     df = df.fillna(0)
@@ -241,7 +241,8 @@ def load_data(sheet_name):
         if '日期' not in df.columns: return initialize_sheet(sheet)
         
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
-        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH']
+        # [更新] 確保讀取時包含特色商品
+        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯']
         for col in numeric_cols:
             if col in df.columns: 
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -261,7 +262,8 @@ def load_data(sheet_name):
 def save_data_to_sheet(sheet_name, df):
     try:
         sheet = get_main_sheet(sheet_name)
-        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '備註']
+        # [更新] 儲存時包含特色商品
+        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯', '備註']
         for col in save_cols:
             if col not in df.columns: df[col] = 0 if col != '備註' else ""
 
@@ -378,54 +380,6 @@ def load_product_data(sheet_name):
     except Exception as e:
         return pd.DataFrame(columns=['檔期', '分類', '品號', '品名', '售價', '訂貨日', '上市日', '備註'])
 
-# --- 3.5 門市特色商品 (Sheet 5) ---
-def get_special_product_sheet(sheet_name):
-    workbook = get_workbook(sheet_name)
-    try: return workbook.worksheet("工作表5")
-    except:
-        try: return workbook.add_worksheet(title="工作表5", rows=100, cols=4)
-        except Exception as e:
-            st.error(f"建立工作表5失敗: {e}")
-            return None
-
-@st.cache_data(ttl=60)
-def load_special_product_data(sheet_name):
-    try:
-        sheet = get_special_product_sheet(sheet_name)
-        data = sheet.get_all_records()
-        cols = ['品項', '原始控量', '剩餘控量']
-        
-        if not data:
-            df = pd.DataFrame([
-                {'品項': '三星蔥寶寶', '原始控量': 0, '剩餘控量': 0},
-                {'品項': '竹筍寶寶', '原始控量': 0, '剩餘控量': 0},
-                {'品項': '車掌造型娃包', '原始控量': 0, '剩餘控量': 0},
-                {'品項': '車長冷水壺', '原始控量': 0, '剩餘控量': 0},
-                {'品項': '木紋不鏽鋼杯', '原始控量': 0, '剩餘控量': 0},
-            ])
-        else:
-            df = pd.DataFrame(data)
-            for c in cols:
-                if c not in df.columns: df[c] = 0 if '量' in c else ""
-                
-        df['原始控量'] = pd.to_numeric(df['原始控量'], errors='coerce').fillna(0).astype(int)
-        df['剩餘控量'] = pd.to_numeric(df['剩餘控量'], errors='coerce').fillna(0).astype(int)
-        df['銷售進度'] = df.apply(lambda x: ((x['原始控量'] - x['剩餘控量']) / x['原始控量'] * 100) if x['原始控量'] > 0 else 0, axis=1)
-        return df
-    except Exception as e:
-        return pd.DataFrame(columns=['品項', '原始控量', '剩餘控量', '銷售進度'])
-
-def save_special_product_data(sheet_name, df):
-    try:
-        sheet = get_special_product_sheet(sheet_name)
-        save_df = df[['品項', '原始控量', '剩餘控量']].fillna(0)
-        sheet.clear()
-        sheet.update([save_df.columns.values.tolist()] + save_df.values.tolist())
-        st.toast("✅ 特色商品庫存已更新！", icon="🛍️")
-        st.cache_data.clear()
-    except Exception as e:
-        st.error(f"特色商品儲存失敗: {e}")
-
 def parse_end_date(period_str):
     try:
         match = re.search(r'~(\d{8})', str(period_str))
@@ -502,6 +456,7 @@ if page == "📊 每日營運報表":
 
     st.subheader(f"📝 {selected_month} 月數據輸入")
     
+    # [更新] 將特色商品加入 Tabs
     tab1, tab2, tab_special, tab3, tab4 = st.tabs(["📊 核心業績", "🥐 商品與庫存", "🛍️ 特色商品", "🛵 外送平台", "⏱️ 人力工時 (Labor)"])
 
     with tab1:
@@ -541,44 +496,31 @@ if page == "📊 每日營運報表":
         )
         
     with tab_special:
-        st.caption("管理羅東林場獨有的特色商品庫存與銷售進度。⚠️ 注意：特色商品庫存為獨立紀錄，請點擊下方專屬按鈕儲存。")
-        special_df = load_special_product_data(current_sheet)
+        st.caption("每日記錄羅東林場獨有的特色商品銷售數量。")
         
-        if not special_df.empty:
-            total_qty = special_df["原始控量"].sum()
-            remain_qty = special_df["剩餘控量"].sum()
-            sold_qty = total_qty - remain_qty
-            sell_rate = (sold_qty / total_qty * 100) if total_qty > 0 else 0
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("特色商品總量", f"{total_qty} 件")
-            c2.metric("已銷售", f"{sold_qty} 件")
-            c3.metric("庫存剩餘", f"{remain_qty} 件")
-            c4.metric("銷售進度", f"{sell_rate:.1f}%")
-            st.markdown("---")
-
-        edited_special_df = st.data_editor(
-            special_df,
+        # 顯示月累計
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("三星蔥寶寶 (月累計)", f"{current_month_df['三星蔥寶寶'].sum():.0f} 件")
+        c2.metric("竹筍寶寶 (月累計)", f"{current_month_df['竹筍寶寶'].sum():.0f} 件")
+        c3.metric("車掌造型娃包 (月累計)", f"{current_month_df['車掌造型娃包'].sum():.0f} 件")
+        c4.metric("車長冷水壺 (月累計)", f"{current_month_df['車長冷水壺'].sum():.0f} 件")
+        c5.metric("木紋不鏽鋼杯 (月累計)", f"{current_month_df['木紋不鏽鋼杯'].sum():.0f} 件")
+        st.markdown("---")
+        
+        # [更新] 每日輸入介面
+        edited_special = st.data_editor(
+            current_month_df[['顯示日期', '日期', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯']],
             column_config={
-                "品項": st.column_config.TextColumn("特色商品名稱", required=True, width="medium"),
-                "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
-                "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
-                "銷售進度": st.column_config.ProgressColumn(
-                    "銷售進度", 
-                    help="已銷售百分比", 
-                    format="%.1f%%",
-                    min_value=0, 
-                    max_value=100
-                ),
+                "顯示日期": st.column_config.TextColumn("日期", disabled=True, width="small"),
+                "日期": None,
+                "三星蔥寶寶": st.column_config.NumberColumn("三星蔥寶寶", format="%d"),
+                "竹筍寶寶": st.column_config.NumberColumn("竹筍寶寶", format="%d"),
+                "車掌造型娃包": st.column_config.NumberColumn("車掌造型娃包", format="%d"),
+                "車長冷水壺": st.column_config.NumberColumn("車長冷水壺", format="%d"),
+                "木紋不鏽鋼杯": st.column_config.NumberColumn("木紋不鏽鋼杯", format="%d"),
             },
-            num_rows="dynamic",
-            use_container_width=True,
-            key="special_product_editor"
+            use_container_width=True, hide_index=True, num_rows="fixed", key="editor_special"
         )
-
-        if st.button("💾 儲存特色商品變更", type="primary"):
-            save_special_product_data(current_sheet, edited_special_df)
-            st.rerun()
     
     with tab3:
         edited_delivery = st.data_editor(
@@ -626,6 +568,13 @@ if page == "📊 每日營運報表":
             row_date = row["日期"]
             mask = df["日期"] == row_date
             cols = ['糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD']
+            for c in cols: df.loc[mask, c] = row[c]
+            
+        # [更新] 儲存特色商品資料
+        for i, row in edited_special.iterrows():
+            row_date = row["日期"]
+            mask = df["日期"] == row_date
+            cols = ['三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯']
             for c in cols: df.loc[mask, c] = row[c]
             
         for i, row in edited_delivery.iterrows():
