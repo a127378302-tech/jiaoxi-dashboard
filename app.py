@@ -209,6 +209,7 @@ def get_workbook(sheet_name):
         return client.open(sheet_name)
     except gspread.exceptions.SpreadsheetNotFound:
         st.error(f"❌ **嚴重錯誤：找不到 Google 試算表「{sheet_name}」**")
+        st.warning("👉 **請確認以下 2 點：**\n\n1. 您的 Google Drive 中確實有這個檔名的試算表。\n2. **(最常見)** 您是否已點擊試算表右上角的「共用」，將您的 GCP 服務帳號 Email 加入並設為「編輯者」？")
         st.stop()
     except Exception as e:
         st.error(f"❌ 連線到試算表時發生未知錯誤: {e}")
@@ -395,7 +396,6 @@ def load_special_product_data(sheet_name):
         cols = ['品項', '原始控量', '剩餘控量']
         
         if not data:
-            # 預設載入特色商品清單
             df = pd.DataFrame([
                 {'品項': '三星蔥寶寶', '原始控量': 0, '剩餘控量': 0},
                 {'品項': '竹筍寶寶', '原始控量': 0, '剩餘控量': 0},
@@ -440,13 +440,12 @@ def parse_end_date(period_str):
 # 4. 主程式 UI 佈局
 # ==========================================
 
-# 單一門市設定
 store_choice = "羅東林場門市"
 current_sheet = "Luodong_Linchang_2026_Data"
 
 with st.sidebar:
     st.title("☕ 羅東林場門市系統")
-    page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "🛍️ 門市特色商品", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
+    page = st.radio("前往頁面", ["📊 每日營運報表", "🎁 節慶禮盒控管", "👥 夥伴休假管理", "📦 新品查詢與訂貨"], index=0)
     st.markdown("---")
     if st.button("🔄 重新讀取資料"):
         st.cache_data.clear()
@@ -503,7 +502,7 @@ if page == "📊 每日營運報表":
 
     st.subheader(f"📝 {selected_month} 月數據輸入")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 核心業績", "🥐 商品與庫存", "🛵 外送平台", "⏱️ 人力工時 (Labor)"])
+    tab1, tab2, tab_special, tab3, tab4 = st.tabs(["📊 核心業績", "🥐 商品與庫存", "🛍️ 特色商品", "🛵 外送平台", "⏱️ 人力工時 (Labor)"])
 
     with tab1:
         st.caption("請輸入每日業績。")
@@ -540,6 +539,46 @@ if page == "📊 每日營運報表":
             },
             use_container_width=True, hide_index=True, num_rows="fixed", key="editor_prod"
         )
+        
+    with tab_special:
+        st.caption("管理羅東林場獨有的特色商品庫存與銷售進度。⚠️ 注意：特色商品庫存為獨立紀錄，請點擊下方專屬按鈕儲存。")
+        special_df = load_special_product_data(current_sheet)
+        
+        if not special_df.empty:
+            total_qty = special_df["原始控量"].sum()
+            remain_qty = special_df["剩餘控量"].sum()
+            sold_qty = total_qty - remain_qty
+            sell_rate = (sold_qty / total_qty * 100) if total_qty > 0 else 0
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("特色商品總量", f"{total_qty} 件")
+            c2.metric("已銷售", f"{sold_qty} 件")
+            c3.metric("庫存剩餘", f"{remain_qty} 件")
+            c4.metric("銷售進度", f"{sell_rate:.1f}%")
+            st.markdown("---")
+
+        edited_special_df = st.data_editor(
+            special_df,
+            column_config={
+                "品項": st.column_config.TextColumn("特色商品名稱", required=True, width="medium"),
+                "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
+                "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
+                "銷售進度": st.column_config.ProgressColumn(
+                    "銷售進度", 
+                    help="已銷售百分比", 
+                    format="%.1f%%",
+                    min_value=0, 
+                    max_value=100
+                ),
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            key="special_product_editor"
+        )
+
+        if st.button("💾 儲存特色商品變更", type="primary"):
+            save_special_product_data(current_sheet, edited_special_df)
+            st.rerun()
     
     with tab3:
         edited_delivery = st.data_editor(
@@ -788,51 +827,6 @@ elif page == "🎁 節慶禮盒控管":
             final_save_df = pd.concat([other_season_df, edited_display_df], ignore_index=True)
             
         save_gift_data(current_sheet, final_save_df)
-        st.rerun()
-
-# ==========================================
-# 頁面: 門市特色商品
-# ==========================================
-elif page == "🛍️ 門市特色商品":
-    st.title(f"🛍️ {store_choice} | 門市特色商品管理")
-    st.caption("管理羅東林場獨有的特色商品庫存與銷售進度。")
-
-    special_df = load_special_product_data(current_sheet)
-    
-    if not special_df.empty:
-        total_qty = special_df["原始控量"].sum()
-        remain_qty = special_df["剩餘控量"].sum()
-        sold_qty = total_qty - remain_qty
-        sell_rate = (sold_qty / total_qty * 100) if total_qty > 0 else 0
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("特色商品總量", f"{total_qty} 件")
-        c2.metric("已銷售", f"{sold_qty} 件")
-        c3.metric("庫存剩餘", f"{remain_qty} 件")
-        c4.metric("銷售進度", f"{sell_rate:.1f}%")
-        st.markdown("---")
-
-    edited_special_df = st.data_editor(
-        special_df,
-        column_config={
-            "品項": st.column_config.TextColumn("特色商品名稱", required=True, width="medium"),
-            "原始控量": st.column_config.NumberColumn("原始控量", min_value=0, step=1, format="%d"),
-            "剩餘控量": st.column_config.NumberColumn("剩餘控量", min_value=0, step=1, format="%d"),
-            "銷售進度": st.column_config.ProgressColumn(
-                "銷售進度", 
-                help="已銷售百分比", 
-                format="%.1f%%",
-                min_value=0, 
-                max_value=100
-            ),
-        },
-        num_rows="dynamic",
-        use_container_width=True,
-        key="special_product_editor"
-    )
-
-    if st.button("💾 儲存特色商品變更", type="primary"):
-        save_special_product_data(current_sheet, edited_special_df)
         st.rerun()
 
 # ==========================================
