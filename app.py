@@ -945,7 +945,7 @@ elif page == "📦 新品查詢與訂貨":
         else:
             st.success("未來 7 天內無新的訂貨排程。")
     except:
-        st.info("日期格式無法解析，暫無法顯示訂貨提醒。")    }
+        st.info("日期格式無法解析，暫無法顯示訂貨提醒。")    
     .order-alert {
         background-color: #ffebee;
         color: #c62828;
