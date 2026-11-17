@@ -78,6 +78,18 @@ TARGET_PSD_2026 = {
     7: 116850, 8: 126152, 9: 136179, 10: 127084, 11: 127580, 12: 132402
 }
 
+# 內用外帶：POS1 / POS2 各分早、晚班，每格記內用與外帶
+DINE_COLS = ['POS1早內用', 'POS1早外帶', 'POS1晚內用', 'POS1晚外帶',
+             'POS2早內用', 'POS2早外帶', 'POS2晚內用', 'POS2晚外帶']
+DINE_IN_COLS = [c for c in DINE_COLS if '內用' in c]
+DINE_OUT_COLS = [c for c in DINE_COLS if '外帶' in c]
+DINE_LABELS = {
+    'POS1早內用': 'POS1 早班 內用', 'POS1早外帶': 'POS1 早班 外帶',
+    'POS1晚內用': 'POS1 晚班 內用', 'POS1晚外帶': 'POS1 晚班 外帶',
+    'POS2早內用': 'POS2 早班 內用', 'POS2早外帶': 'POS2 早班 外帶',
+    'POS2晚內用': 'POS2 晚班 內用', 'POS2晚外帶': 'POS2 晚班 外帶',
+}
+
 NEW_PRODUCT_WAVES = [
     {"name": "Spring1", "order_date": "2026-02-04", "launch_date": "2026-02-11"},
     {"name": "Spring2", "order_date": "2026-02-09", "launch_date": "2026-02-25"},
@@ -216,7 +228,7 @@ def get_main_sheet(sheet_name):
 
 def initialize_sheet(sheet):
     date_range = pd.date_range(start="2026-01-01", end="2026-12-31", freq="D")
-    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯', '備註']
+    cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯', '備註'] + DINE_COLS
     df = pd.DataFrame(columns=cols)
     df['日期'] = date_range.astype(str)
     df = df.fillna(0)
@@ -236,7 +248,7 @@ def load_data(sheet_name):
         if '日期' not in df.columns: return initialize_sheet(sheet)
         
         df["日期"] = pd.to_datetime(df["日期"]).dt.date
-        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯']
+        numeric_cols = ['目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯'] + DINE_COLS
         for col in numeric_cols:
             if col in df.columns: 
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -256,7 +268,7 @@ def load_data(sheet_name):
 def save_data_to_sheet(sheet_name, df):
     try:
         sheet = get_main_sheet(sheet_name)
-        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯', '備註']
+        save_cols = ['日期', '目標PSD', '實績PSD', 'PSD達成率', 'ADT', 'AT', '糕點PSD', '糕點USD', '糕點報廢USD', 'Retail', 'CB', '現烤', 'BAF', '節慶USD', 'foodpanda', 'foodomo', 'MOP', '日工時', '貢獻度', 'IPLH', '三星蔥寶寶', '竹筍寶寶', '車掌造型娃包', '車長冷水壺', '木紋不鏽鋼杯', '備註'] + DINE_COLS
         for col in save_cols:
             if col not in df.columns: df[col] = 0 if col != '備註' else ""
 
@@ -440,6 +452,11 @@ if page == "📊 每日營運報表":
     df = st.session_state.df
     if df.empty: st.stop()
 
+    # 保險：若 session 內的舊資料缺少內用外帶欄位，自動補 0
+    for _c in DINE_COLS:
+        if _c not in df.columns:
+            df[_c] = 0
+
     current_month = today.month
     selected_month = st.selectbox("月份", range(1, 13), index=current_month-1)
     df["Month"] = pd.to_datetime(df["日期"]).dt.month
@@ -449,7 +466,9 @@ if page == "📊 每日營運報表":
 
     st.subheader(f"📝 {selected_month} 月數據輸入")
     
-    tab1, tab2, tab_special, tab3, tab4 = st.tabs(["📊 核心業績", "🥐 商品與庫存", "🛍️ 特色商品", "🛵 外送平台", "⏱️ 人力工時 (Labor)"])
+    tab1, tab2, tab_special, tab3, tab4, tab_dine = st.tabs(
+        ["📊 核心業績", "🥐 商品與庫存", "🛍️ 特色商品", "🛵 外送平台", "⏱️ 人力工時 (Labor)", "🍽️ 內用外帶"]
+    )
 
     with tab1:
         st.caption("請輸入每日業績。")
@@ -540,6 +559,48 @@ if page == "📊 每日營運報表":
             use_container_width=True, hide_index=True, num_rows="fixed", key="editor_labor"
         )
 
+    with tab_dine:
+        st.caption("依紙本表格輸入 POS1 / POS2 早晚班的內用、外帶來客數；總內用、總外帶、總來客與比率會自動計算（修改數字後按下方「確認更新」儲存，總計列會同步更新）。")
+
+        dine_df = current_month_df[['顯示日期', '日期'] + DINE_COLS].copy()
+        dine_df['總內用'] = dine_df[DINE_IN_COLS].sum(axis=1)
+        dine_df['總外帶'] = dine_df[DINE_OUT_COLS].sum(axis=1)
+        dine_df['總來客'] = dine_df['總內用'] + dine_df['總外帶']
+        _denom = dine_df['總來客'].where(dine_df['總來客'] > 0, 1)
+        dine_df['內用率'] = dine_df['總內用'] / _denom * 100
+        dine_df['外帶率'] = dine_df['總外帶'] / _denom * 100
+
+        # 當月累計看板
+        m_in = dine_df['總內用'].sum()
+        m_out = dine_df['總外帶'].sum()
+        m_all = m_in + m_out
+        x1, x2, x3, x4, x5 = st.columns(5)
+        x1.metric("總內用", f"{m_in:,.0f}")
+        x2.metric("總外帶", f"{m_out:,.0f}")
+        x3.metric("總來客", f"{m_all:,.0f}")
+        x4.metric("內用率", f"{(m_in / m_all * 100) if m_all else 0:.1f}%")
+        x5.metric("外帶率", f"{(m_out / m_all * 100) if m_all else 0:.1f}%")
+        st.markdown("---")
+
+        dine_config = {
+            "顯示日期": st.column_config.TextColumn("日期", disabled=True, width="small"),
+            "日期": None,
+            "總內用": st.column_config.NumberColumn("總內用", disabled=True, format="%d"),
+            "總外帶": st.column_config.NumberColumn("總外帶", disabled=True, format="%d"),
+            "總來客": st.column_config.NumberColumn("總來客", disabled=True, format="%d"),
+            "內用率": st.column_config.NumberColumn("內用率", disabled=True, format="%.1f%%"),
+            "外帶率": st.column_config.NumberColumn("外帶率", disabled=True, format="%.1f%%"),
+        }
+        for c in DINE_COLS:
+            dine_config[c] = st.column_config.NumberColumn(DINE_LABELS[c], min_value=0, step=1, format="%d")
+
+        edited_dine = st.data_editor(
+            dine_df,
+            column_config=dine_config,
+            column_order=['顯示日期'] + DINE_COLS + ['總內用', '內用率', '總外帶', '外帶率', '總來客'],
+            use_container_width=True, hide_index=True, num_rows="fixed", key="editor_dine"
+        )
+
     if st.button("💾 確認更新 (並自動計算)", type="primary"):
         for i, row in edited_kpi.iterrows():
             row_date = row["日期"]
@@ -584,6 +645,13 @@ if page == "📊 每日營運報表":
                 labor_hours = float(row["日工時"])
                 contribution = int(current_psd / labor_hours) if labor_hours > 0 else 0
                 df.loc[mask, "貢獻度"] = contribution
+
+        for i, row in edited_dine.iterrows():
+            row_date = row["日期"]
+            mask = df["日期"] == row_date
+            if mask.any():
+                for c in DINE_COLS:
+                    df.loc[mask, c] = row[c]
 
         save_data_to_sheet(current_sheet, df)
         st.session_state.df = df
